@@ -2,7 +2,10 @@
 package dto
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -204,7 +207,7 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		Status:                  a.Status,
 		ErrorMessage:            a.ErrorMessage,
 		LastUsedAt:              a.LastUsedAt,
-		ExpiresAt:               timeToUnixSeconds(a.ExpiresAt),
+		ExpiresAt:               inferredAccountExpiresAt(a),
 		AutoPauseOnExpired:      a.AutoPauseOnExpired,
 		CreatedAt:               a.CreatedAt,
 		UpdatedAt:               a.UpdatedAt,
@@ -314,6 +317,100 @@ func timeToUnixSeconds(value *time.Time) *int64 {
 	}
 	ts := value.Unix()
 	return &ts
+}
+
+func inferredAccountExpiresAt(a *service.Account) *int64 {
+	if a == nil {
+		return nil
+	}
+	if expiresAt := timeToUnixSeconds(a.ExpiresAt); expiresAt != nil {
+		return expiresAt
+	}
+	if expiresAt := inferExpiresAtFromMap(a.Credentials); expiresAt != nil {
+		return expiresAt
+	}
+	if expiresAt := inferExpiresAtFromAccessToken(a.Credentials); expiresAt != nil {
+		return expiresAt
+	}
+	if expiresAt := inferExpiresAtFromMap(a.Extra); expiresAt != nil {
+		return expiresAt
+	}
+	return nil
+}
+
+func inferExpiresAtFromMap(values map[string]any) *int64 {
+	if len(values) == 0 {
+		return nil
+	}
+	raw, ok := values["expires_at"]
+	if !ok {
+		return nil
+	}
+	return normalizeExpiresAtValue(raw)
+}
+
+func normalizeExpiresAtValue(value any) *int64 {
+	switch v := value.(type) {
+	case nil:
+		return nil
+	case int64:
+		return normalizeUnixSeconds(v)
+	case int:
+		return normalizeUnixSeconds(int64(v))
+	case float64:
+		return normalizeUnixSeconds(int64(v))
+	case string:
+		s := strings.TrimSpace(v)
+		if s == "" {
+			return nil
+		}
+		if i, err := strconv.ParseInt(s, 10, 64); err == nil {
+			return normalizeUnixSeconds(i)
+		}
+		if ts, err := time.Parse(time.RFC3339, s); err == nil {
+			unix := ts.Unix()
+			return &unix
+		}
+	}
+	return nil
+}
+
+func inferExpiresAtFromAccessToken(values map[string]any) *int64 {
+	if len(values) == 0 {
+		return nil
+	}
+	raw, ok := values["access_token"]
+	if !ok {
+		return nil
+	}
+	token, ok := raw.(string)
+	if !ok {
+		return nil
+	}
+	parts := strings.Split(token, ".")
+	if len(parts) < 2 {
+		return nil
+	}
+	payloadPart := parts[1]
+	payload, err := base64.RawURLEncoding.DecodeString(payloadPart)
+	if err != nil {
+		return nil
+	}
+	var claims map[string]any
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return nil
+	}
+	return normalizeExpiresAtValue(claims["exp"])
+}
+
+func normalizeUnixSeconds(raw int64) *int64 {
+	if raw <= 0 {
+		return nil
+	}
+	if raw >= 1_000_000_000_000 {
+		raw /= 1000
+	}
+	return &raw
 }
 
 func AccountGroupFromService(ag *service.AccountGroup) *AccountGroup {
