@@ -415,8 +415,14 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 
 	if isOAuth && s.accountRepo != nil {
 		if updates, err := extractOpenAICodexProbeUpdates(resp); err == nil && len(updates) > 0 {
+			clearStaleRateLimit := shouldClearOpenAICodexRateLimit(account, updates, nil)
 			_ = s.accountRepo.UpdateExtra(ctx, account.ID, updates)
 			mergeAccountExtra(account, updates)
+			if clearStaleRateLimit {
+				_ = s.accountRepo.ClearRateLimit(ctx, account.ID)
+				account.RateLimitResetAt = nil
+				account.RateLimitedAt = nil
+			}
 		}
 		if snapshot := ParseCodexRateLimitHeaders(resp.Header); snapshot != nil {
 			if resetAt := codexRateLimitResetAtFromSnapshot(snapshot, time.Now()); resetAt != nil {

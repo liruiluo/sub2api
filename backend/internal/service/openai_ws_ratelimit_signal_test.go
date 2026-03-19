@@ -25,8 +25,9 @@ type openAIWSRateLimitSignalRepo struct {
 
 type openAICodexSnapshotAsyncRepo struct {
 	stubOpenAIAccountRepo
-	updateExtraCh chan map[string]any
-	rateLimitCh   chan time.Time
+	updateExtraCh    chan map[string]any
+	rateLimitCh      chan time.Time
+	clearRateLimitCh chan int64
 }
 
 type openAICodexExtraListRepo struct {
@@ -62,6 +63,13 @@ func (r *openAICodexSnapshotAsyncRepo) UpdateExtra(_ context.Context, _ int64, u
 			copied[k] = v
 		}
 		r.updateExtraCh <- copied
+	}
+	return nil
+}
+
+func (r *openAICodexSnapshotAsyncRepo) ClearRateLimit(_ context.Context, id int64) error {
+	if r.clearRateLimitCh != nil {
+		r.clearRateLimitCh <- id
 	}
 	return nil
 }
@@ -402,6 +410,46 @@ func TestOpenAIGatewayService_UpdateCodexUsageSnapshot_NonExhaustedSnapshotDoesN
 	case resetAt := <-repo.rateLimitCh:
 		t.Fatalf("unexpected rate limit reset at: %v", resetAt)
 	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+func TestOpenAIGatewayService_UpdateCodexUsageSnapshot_ClearsStaleRateLimitWhenSnapshotRecovers(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	repo := &openAICodexSnapshotAsyncRepo{
+		stubOpenAIAccountRepo: stubOpenAIAccountRepo{accounts: []Account{{
+			ID:               603,
+			Platform:         PlatformOpenAI,
+			Type:             AccountTypeOAuth,
+			RateLimitResetAt: &now,
+			Extra: map[string]any{
+				codexRateLimitActiveExtraKey: true,
+			},
+		}}},
+		updateExtraCh:    make(chan map[string]any, 1),
+		clearRateLimitCh: make(chan int64, 1),
+	}
+	svc := &OpenAIGatewayService{accountRepo: repo}
+	snapshot := &OpenAICodexUsageSnapshot{
+		PrimaryUsedPercent:         ptrFloat64WS(12),
+		PrimaryResetAfterSeconds:   ptrIntWS(3600),
+		PrimaryWindowMinutes:       ptrIntWS(10080),
+		SecondaryUsedPercent:       ptrFloat64WS(0),
+		SecondaryResetAfterSeconds: ptrIntWS(1200),
+		SecondaryWindowMinutes:     ptrIntWS(300),
+	}
+	svc.updateCodexUsageSnapshot(context.Background(), 603, snapshot)
+
+	select {
+	case <-repo.updateExtraCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("等待 codex 快照落库超时")
+	}
+
+	select {
+	case gotID := <-repo.clearRateLimitCh:
+		require.Equal(t, int64(603), gotID)
+	case <-time.After(2 * time.Second):
+		t.Fatal("等待 stale codex 限流自动清理超时")
 	}
 }
 

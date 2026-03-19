@@ -9,8 +9,9 @@ import (
 
 type accountUsageCodexProbeRepo struct {
 	stubOpenAIAccountRepo
-	updateExtraCh chan map[string]any
-	rateLimitCh   chan time.Time
+	updateExtraCh    chan map[string]any
+	rateLimitCh      chan time.Time
+	clearRateLimitCh chan int64
 }
 
 func (r *accountUsageCodexProbeRepo) UpdateExtra(_ context.Context, _ int64, updates map[string]any) error {
@@ -27,6 +28,13 @@ func (r *accountUsageCodexProbeRepo) UpdateExtra(_ context.Context, _ int64, upd
 func (r *accountUsageCodexProbeRepo) SetRateLimited(_ context.Context, _ int64, resetAt time.Time) error {
 	if r.rateLimitCh != nil {
 		r.rateLimitCh <- resetAt
+	}
+	return nil
+}
+
+func (r *accountUsageCodexProbeRepo) ClearRateLimit(_ context.Context, id int64) error {
+	if r.clearRateLimitCh != nil {
+		r.clearRateLimitCh <- id
 	}
 	return nil
 }
@@ -126,8 +134,9 @@ func TestAccountUsageService_PersistOpenAICodexProbeSnapshotSetsRateLimit(t *tes
 	resetAt := time.Now().Add(2 * time.Hour).UTC().Truncate(time.Second)
 
 	svc.persistOpenAICodexProbeSnapshot(321, map[string]any{
-		"codex_7d_used_percent": 100.0,
-		"codex_7d_reset_at":     resetAt.Format(time.RFC3339),
+		"codex_7d_used_percent":      100.0,
+		"codex_7d_reset_at":          resetAt.Format(time.RFC3339),
+		codexRateLimitActiveExtraKey: true,
 	}, &resetAt)
 
 	select {
@@ -146,5 +155,46 @@ func TestAccountUsageService_PersistOpenAICodexProbeSnapshotSetsRateLimit(t *tes
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("waiting for codex probe rate limit persistence timed out")
+	}
+}
+
+func TestAccountUsageService_PersistOpenAICodexProbeSnapshotClearsStaleRateLimit(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC().Truncate(time.Second)
+	repo := &accountUsageCodexProbeRepo{
+		stubOpenAIAccountRepo: stubOpenAIAccountRepo{accounts: []Account{{
+			ID:               322,
+			Platform:         PlatformOpenAI,
+			Type:             AccountTypeOAuth,
+			RateLimitResetAt: &now,
+			Extra: map[string]any{
+				codexRateLimitActiveExtraKey: true,
+			},
+		}}},
+		updateExtraCh:    make(chan map[string]any, 1),
+		clearRateLimitCh: make(chan int64, 1),
+	}
+	svc := &AccountUsageService{accountRepo: repo}
+
+	svc.persistOpenAICodexProbeSnapshot(322, map[string]any{
+		"codex_5h_used_percent":      0.0,
+		"codex_7d_used_percent":      0.0,
+		codexRateLimitActiveExtraKey: false,
+	}, nil)
+
+	select {
+	case <-repo.updateExtraCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("waiting for codex probe extra persistence timed out")
+	}
+
+	select {
+	case gotID := <-repo.clearRateLimitCh:
+		if gotID != 322 {
+			t.Fatalf("clear rate limit account id = %d, want 322", gotID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("waiting for stale codex rate limit clear timed out")
 	}
 }
