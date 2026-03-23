@@ -2006,7 +2006,8 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 	var err error
 	if groupID != nil {
 		accounts, err = s.accountRepo.ListSchedulableByGroupIDAndPlatform(ctx, *groupID, platform)
-		// 分组内无账号则返回空列表，由上层处理错误，不再回退到全平台查询
+		// Group-specific keys stay pinned to their own accounts even in simple mode;
+		// 分组内无账号则返回空列表，由上层处理错误，不再回退到全平台查询。
 	} else if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
 		accounts, err = s.accountRepo.ListSchedulableByPlatform(ctx, platform)
 	} else {
@@ -2033,6 +2034,51 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 			"tls_fingerprint", acc.IsTLSFingerprintEnabled())
 	}
 	return accounts, useMixed, nil
+}
+
+func (s *GatewayService) listSoraSchedulableAccounts(ctx context.Context, groupID *int64) ([]Account, bool, error) {
+	const useMixed = false
+
+	var accounts []Account
+	var err error
+	if groupID != nil {
+		accounts, err = s.accountRepo.ListByGroup(ctx, *groupID)
+	} else {
+		accounts, err = s.accountRepo.ListByPlatform(ctx, PlatformSora)
+	}
+	if err != nil {
+		slog.Debug("account_scheduling_list_failed",
+			"group_id", derefGroupID(groupID),
+			"platform", PlatformSora,
+			"error", err)
+		return nil, useMixed, err
+	}
+
+	filtered := make([]Account, 0, len(accounts))
+	for _, acc := range accounts {
+		if acc.Platform != PlatformSora {
+			continue
+		}
+		if !s.isSoraAccountSchedulable(&acc) {
+			continue
+		}
+		filtered = append(filtered, acc)
+	}
+	slog.Debug("account_scheduling_list_sora",
+		"group_id", derefGroupID(groupID),
+		"platform", PlatformSora,
+		"raw_count", len(accounts),
+		"filtered_count", len(filtered))
+	for _, acc := range filtered {
+		slog.Debug("account_scheduling_account_detail",
+			"account_id", acc.ID,
+			"name", acc.Name,
+			"platform", acc.Platform,
+			"type", acc.Type,
+			"status", acc.Status,
+			"tls_fingerprint", acc.IsTLSFingerprintEnabled())
+	}
+	return filtered, useMixed, nil
 }
 
 // IsSingleAntigravityAccountGroup 检查指定分组是否只有一个 antigravity 平台的可调度账号。
