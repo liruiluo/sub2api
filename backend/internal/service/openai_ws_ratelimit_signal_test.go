@@ -438,6 +438,7 @@ func TestOpenAIGatewayService_UpdateCodexUsageSnapshot_ClearsStaleRateLimitWhenS
 		SecondaryResetAfterSeconds: ptrIntWS(1200),
 		SecondaryWindowMinutes:     ptrIntWS(300),
 	}
+	// no exhausted window -> resetAt nil, but updates should mark codex_rate_limit_active=false
 	svc.updateCodexUsageSnapshot(context.Background(), 603, snapshot)
 
 	select {
