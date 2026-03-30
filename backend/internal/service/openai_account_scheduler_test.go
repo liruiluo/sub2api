@@ -16,6 +16,38 @@ type openAISnapshotCacheStub struct {
 	SchedulerCache
 	snapshotAccounts []*Account
 	accountsByID     map[int64]*Account
+	lastSetBucket    SchedulerBucket
+	lastSetAccounts  []Account
+}
+
+type openAIGroupAwareRepoStub struct {
+	stubOpenAIAccountRepo
+}
+
+func (r openAIGroupAwareRepoStub) ListSchedulableByGroupIDAndPlatform(ctx context.Context, groupID int64, platform string) ([]Account, error) {
+	var result []Account
+	for _, acc := range r.accounts {
+		if acc.Platform != platform || !acc.IsSchedulable() {
+			continue
+		}
+		for _, ag := range acc.AccountGroups {
+			if ag.GroupID == groupID {
+				result = append(result, acc)
+				break
+			}
+		}
+	}
+	return result, nil
+}
+
+func (r openAIGroupAwareRepoStub) ListSchedulableUngroupedByPlatform(ctx context.Context, platform string) ([]Account, error) {
+	var result []Account
+	for _, acc := range r.accounts {
+		if acc.Platform == platform && acc.IsSchedulable() && len(acc.AccountGroups) == 0 {
+			result = append(result, acc)
+		}
+	}
+	return result, nil
 }
 
 func (s *openAISnapshotCacheStub) GetSnapshot(ctx context.Context, bucket SchedulerBucket) ([]*Account, bool, error) {
@@ -45,6 +77,12 @@ func (s *openAISnapshotCacheStub) GetAccount(ctx context.Context, accountID int6
 	return &cloned, nil
 }
 
+func (s *openAISnapshotCacheStub) SetSnapshot(ctx context.Context, bucket SchedulerBucket, accounts []Account) error {
+	s.lastSetBucket = bucket
+	s.lastSetAccounts = append([]Account(nil), accounts...)
+	return nil
+}
+
 func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyRateLimitedAccountFallsBackToFreshCandidate(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(10101)
@@ -64,6 +102,129 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyRateLimite
 	require.NotNil(t, selection.Account)
 	require.Equal(t, int64(31002), selection.Account.ID)
 	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+}
+
+func TestOpenAIGatewayService_SelectAccountWithScheduler_RepairsStaleGroupSnapshot(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(10103)
+	staleWrongGroup := Account{
+		ID:          32011,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    0,
+		GroupIDs:    []int64{6},
+		AccountGroups: []AccountGroup{
+			{AccountID: 32011, GroupID: 6},
+		},
+	}
+	staleCorrectGroup := Account{
+		ID:          32012,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    9,
+		GroupIDs:    []int64{groupID},
+		AccountGroups: []AccountGroup{
+			{AccountID: 32012, GroupID: groupID},
+		},
+	}
+
+	snapshotCache := &openAISnapshotCacheStub{
+		snapshotAccounts: []*Account{&staleWrongGroup, &staleCorrectGroup},
+		accountsByID: map[int64]*Account{
+			32011: &staleWrongGroup,
+			32012: &staleCorrectGroup,
+		},
+	}
+	snapshotService := &SchedulerSnapshotService{cache: snapshotCache}
+	svc := &OpenAIGatewayService{
+		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{staleWrongGroup, staleCorrectGroup}},
+		cfg:                &config.Config{},
+		schedulerSnapshot:  snapshotService,
+		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+	}
+
+	selection, decision, err := svc.SelectAccountWithScheduler(
+		ctx,
+		&groupID,
+		"",
+		"",
+		"gpt-5.1",
+		nil,
+		OpenAIUpstreamTransportAny,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, int64(32012), selection.Account.ID, "stale snapshot account from other group should be filtered out")
+	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+	require.Zero(t, snapshotCache.lastSetBucket.GroupID, "grouped OpenAI selection should bypass stale simple-mode snapshot buckets")
+	require.Len(t, snapshotCache.lastSetAccounts, 0)
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
+func TestOpenAIGatewayService_SelectAccountWithScheduler_SimpleModeGroupedKeyStillHonorsGroup(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(10)
+	accounts := []Account{
+		{
+			ID:          33011,
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeOAuth,
+			Status:      StatusActive,
+			Schedulable: true,
+			Concurrency: 1,
+			Priority:    0,
+			GroupIDs:    []int64{6},
+			AccountGroups: []AccountGroup{
+				{AccountID: 33011, GroupID: 6},
+			},
+		},
+		{
+			ID:          33012,
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeOAuth,
+			Status:      StatusActive,
+			Schedulable: true,
+			Concurrency: 1,
+			Priority:    9,
+			GroupIDs:    []int64{10},
+			AccountGroups: []AccountGroup{
+				{AccountID: 33012, GroupID: 10},
+			},
+		},
+	}
+
+	svc := &OpenAIGatewayService{
+		accountRepo:        openAIGroupAwareRepoStub{stubOpenAIAccountRepo{accounts: accounts}},
+		cfg:                &config.Config{RunMode: config.RunModeSimple},
+		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+	}
+
+	selection, decision, err := svc.SelectAccountWithScheduler(
+		ctx,
+		&groupID,
+		"",
+		"",
+		"gpt-5.1",
+		nil,
+		OpenAIUpstreamTransportAny,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, int64(33012), selection.Account.ID, "simple mode should still honor explicit OpenAI group routing")
+	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
 }
 
 func TestOpenAIGatewayService_SelectAccountForModelWithExclusions_SkipsFreshlyRateLimitedSnapshotCandidate(t *testing.T) {

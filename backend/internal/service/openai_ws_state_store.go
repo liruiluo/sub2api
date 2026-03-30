@@ -98,11 +98,12 @@ func (s *defaultOpenAIWSStateStore) BindResponseAccount(ctx context.Context, gro
 	}
 	ttl = normalizeOpenAIWSTTL(ttl)
 	s.maybeCleanup()
+	localKey := openAIWSResponseAccountLocalKey(groupID, id)
 
 	expiresAt := time.Now().Add(ttl)
 	s.responseToAccountMu.Lock()
-	ensureBindingCapacity(s.responseToAccount, id, openAIWSStateStoreMaxEntriesPerMap)
-	s.responseToAccount[id] = openAIWSAccountBinding{accountID: accountID, expiresAt: expiresAt}
+	ensureBindingCapacity(s.responseToAccount, localKey, openAIWSStateStoreMaxEntriesPerMap)
+	s.responseToAccount[localKey] = openAIWSAccountBinding{accountID: accountID, expiresAt: expiresAt}
 	s.responseToAccountMu.Unlock()
 
 	if s.cache == nil {
@@ -120,10 +121,11 @@ func (s *defaultOpenAIWSStateStore) GetResponseAccount(ctx context.Context, grou
 		return 0, nil
 	}
 	s.maybeCleanup()
+	localKey := openAIWSResponseAccountLocalKey(groupID, id)
 
 	now := time.Now()
 	s.responseToAccountMu.RLock()
-	if binding, ok := s.responseToAccount[id]; ok {
+	if binding, ok := s.responseToAccount[localKey]; ok {
 		if now.Before(binding.expiresAt) {
 			accountID := binding.accountID
 			s.responseToAccountMu.RUnlock()
@@ -152,8 +154,9 @@ func (s *defaultOpenAIWSStateStore) DeleteResponseAccount(ctx context.Context, g
 	if id == "" {
 		return nil
 	}
+	localKey := openAIWSResponseAccountLocalKey(groupID, id)
 	s.responseToAccountMu.Lock()
-	delete(s.responseToAccount, id)
+	delete(s.responseToAccount, localKey)
 	s.responseToAccountMu.Unlock()
 
 	if s.cache == nil {
@@ -415,6 +418,14 @@ func normalizeOpenAIWSResponseID(responseID string) string {
 func openAIWSResponseAccountCacheKey(responseID string) string {
 	sum := sha256.Sum256([]byte(responseID))
 	return openAIWSResponseAccountCachePrefix + hex.EncodeToString(sum[:])
+}
+
+func openAIWSResponseAccountLocalKey(groupID int64, responseID string) string {
+	normalized := normalizeOpenAIWSResponseID(responseID)
+	if normalized == "" {
+		return ""
+	}
+	return fmt.Sprintf("%d:%s", groupID, normalized)
 }
 
 func normalizeOpenAIWSTTL(ttl time.Duration) time.Duration {

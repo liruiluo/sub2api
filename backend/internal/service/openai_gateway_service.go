@@ -1636,7 +1636,7 @@ func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, grou
 func (s *OpenAIGatewayService) queryOpenAISchedulableAccountsDirect(ctx context.Context, groupID *int64) ([]Account, error) {
 	var accounts []Account
 	var err error
-	if groupID != nil {
+	if groupID != nil && *groupID > 0 {
 		accounts, err = s.accountRepo.ListSchedulableByGroupIDAndPlatform(ctx, *groupID, PlatformOpenAI)
 	} else if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
 		accounts, err = s.accountRepo.ListSchedulableByPlatform(ctx, PlatformOpenAI)
@@ -1835,8 +1835,38 @@ func shouldFailoverOpenAIStreamingFailure(c *gin.Context, firstTokenMs *int, cli
 	return !c.Writer.Written()
 }
 
+func isOpenAIMisconfiguredRouteNotFound(upstreamStatusCode int, upstreamMsg string, upstreamBody []byte) bool {
+	if upstreamStatusCode != http.StatusNotFound {
+		return false
+	}
+
+	match := func(text string) bool {
+		lower := strings.ToLower(strings.TrimSpace(text))
+		if lower == "" {
+			return false
+		}
+		return strings.Contains(lower, "page not found") ||
+			strings.Contains(lower, "route not found") ||
+			strings.Contains(lower, "endpoint not found")
+	}
+
+	if match(upstreamMsg) {
+		return true
+	}
+	if len(upstreamBody) == 0 {
+		return false
+	}
+	if match(gjson.GetBytes(upstreamBody, "error.message").String()) {
+		return true
+	}
+	return match(string(upstreamBody))
+}
+
 func (s *OpenAIGatewayService) shouldFailoverOpenAIUpstreamResponse(statusCode int, upstreamMsg string, upstreamBody []byte) bool {
 	if s.shouldFailoverUpstreamError(statusCode) {
+		return true
+	}
+	if isOpenAIMisconfiguredRouteNotFound(statusCode, upstreamMsg, upstreamBody) {
 		return true
 	}
 	return isOpenAITransientProcessingError(statusCode, upstreamMsg, upstreamBody)

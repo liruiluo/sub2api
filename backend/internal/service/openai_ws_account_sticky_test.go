@@ -169,6 +169,46 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_Excluded(t *test
 	require.Nil(t, selection)
 }
 
+func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_GroupMismatchClearsBinding(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(23)
+	account := Account{
+		ID:          18,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		GroupIDs:    []int64{6},
+		AccountGroups: []AccountGroup{
+			{AccountID: 18, GroupID: 6},
+		},
+		Extra: map[string]any{
+			"openai_apikey_responses_websockets_v2_enabled": true,
+		},
+	}
+	cache := &stubGatewayCache{}
+	store := NewOpenAIWSStateStore(cache)
+	cfg := newOpenAIWSV2TestConfig()
+	svc := &OpenAIGatewayService{
+		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{account}},
+		cache:              cache,
+		cfg:                cfg,
+		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+		openaiWSStateStore: store,
+	}
+
+	require.NoError(t, store.BindResponseAccount(ctx, groupID, "resp_prev_wrong_group", account.ID, time.Hour))
+
+	selection, err := svc.SelectAccountByPreviousResponseID(ctx, &groupID, "resp_prev_wrong_group", "gpt-5.1", nil)
+	require.NoError(t, err)
+	require.Nil(t, selection, "跨组 previous_response_id 粘连不应继续命中")
+
+	boundAccountID, getErr := store.GetResponseAccount(ctx, groupID, "resp_prev_wrong_group")
+	require.NoError(t, getErr)
+	require.Zero(t, boundAccountID, "跨组旧绑定应被清理")
+}
+
 func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_ForceHTTPIgnored(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(23)

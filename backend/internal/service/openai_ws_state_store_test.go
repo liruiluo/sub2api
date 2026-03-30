@@ -28,6 +28,26 @@ func TestOpenAIWSStateStore_BindGetDeleteResponseAccount(t *testing.T) {
 	require.Zero(t, accountID)
 }
 
+func TestOpenAIWSStateStore_ResponseAccount_GroupIsolationLocalCache(t *testing.T) {
+	store := NewOpenAIWSStateStore(nil)
+	ctx := context.Background()
+
+	require.NoError(t, store.BindResponseAccount(ctx, 7, "resp_group_scoped", 101, time.Minute))
+	require.NoError(t, store.BindResponseAccount(ctx, 10, "resp_group_scoped", 202, time.Minute))
+
+	accountID, err := store.GetResponseAccount(ctx, 7, "resp_group_scoped")
+	require.NoError(t, err)
+	require.Equal(t, int64(101), accountID)
+
+	accountID, err = store.GetResponseAccount(ctx, 10, "resp_group_scoped")
+	require.NoError(t, err)
+	require.Equal(t, int64(202), accountID)
+
+	accountID, err = store.GetResponseAccount(ctx, 11, "resp_group_scoped")
+	require.NoError(t, err)
+	require.Zero(t, accountID)
+}
+
 func TestOpenAIWSStateStore_ResponseConnTTL(t *testing.T) {
 	store := NewOpenAIWSStateStore(nil)
 	store.BindResponseConn("resp_conn", "conn_1", 30*time.Millisecond)
