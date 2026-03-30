@@ -227,6 +227,11 @@ func (s *defaultOpenAIAccountScheduler) Select(
 	req OpenAIAccountScheduleRequest,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
 	decision := OpenAIAccountScheduleDecision{}
+	excludedIDs := cloneOpenAIExcludedIDs(req.ExcludedIDs)
+	var stickyFallbackSelection *AccountSelectionResult
+	var stickyFallbackLayer string
+	var stickyFallbackPrevious bool
+	var stickyFallbackSession bool
 	start := time.Now()
 	defer func() {
 		decision.LatencyMs = time.Since(start).Milliseconds()
@@ -251,40 +256,75 @@ func (s *defaultOpenAIAccountScheduler) Select(
 			}
 		}
 		if selection != nil && selection.Account != nil {
-			decision.Layer = openAIAccountScheduleLayerPreviousResponse
-			decision.StickyPreviousHit = true
-			decision.SelectedAccountID = selection.Account.ID
-			decision.SelectedAccountType = selection.Account.Type
-			if req.SessionHash != "" {
-				_ = s.service.BindStickySession(ctx, req.GroupID, req.SessionHash, selection.Account.ID)
+			if selection.Acquired || selection.WaitPlan == nil {
+				decision.Layer = openAIAccountScheduleLayerPreviousResponse
+				decision.StickyPreviousHit = true
+				decision.SelectedAccountID = selection.Account.ID
+				decision.SelectedAccountType = selection.Account.Type
+				if req.SessionHash != "" {
+					_ = s.service.BindStickySession(ctx, req.GroupID, req.SessionHash, selection.Account.ID)
+				}
+				return selection, decision, nil
 			}
-			return selection, decision, nil
+			stickyFallbackSelection = selection
+			stickyFallbackLayer = openAIAccountScheduleLayerPreviousResponse
+			stickyFallbackPrevious = true
+			excludedIDs = addOpenAIExcludedID(excludedIDs, selection.Account.ID)
 		}
 	}
 
-	selection, err := s.selectBySessionHash(ctx, req)
+	sessionReq := req
+	sessionReq.ExcludedIDs = excludedIDs
+	selection, err := s.selectBySessionHash(ctx, sessionReq)
 	if err != nil {
 		return nil, decision, err
 	}
 	if selection != nil && selection.Account != nil {
-		decision.Layer = openAIAccountScheduleLayerSessionSticky
-		decision.StickySessionHit = true
-		decision.SelectedAccountID = selection.Account.ID
-		decision.SelectedAccountType = selection.Account.Type
-		return selection, decision, nil
+		if selection.Acquired || selection.WaitPlan == nil {
+			decision.Layer = openAIAccountScheduleLayerSessionSticky
+			decision.StickySessionHit = true
+			decision.SelectedAccountID = selection.Account.ID
+			decision.SelectedAccountType = selection.Account.Type
+			return selection, decision, nil
+		}
+		if stickyFallbackSelection == nil {
+			stickyFallbackSelection = selection
+			stickyFallbackLayer = openAIAccountScheduleLayerSessionSticky
+			stickyFallbackSession = true
+		}
+		excludedIDs = addOpenAIExcludedID(excludedIDs, selection.Account.ID)
 	}
 
-	selection, candidateCount, topK, loadSkew, err := s.selectByLoadBalance(ctx, req)
+	loadReq := req
+	loadReq.ExcludedIDs = excludedIDs
+	selection, candidateCount, topK, loadSkew, err := s.selectByLoadBalance(ctx, loadReq)
 	decision.Layer = openAIAccountScheduleLayerLoadBalance
 	decision.CandidateCount = candidateCount
 	decision.TopK = topK
 	decision.LoadSkew = loadSkew
 	if err != nil {
+		if stickyFallbackSelection != nil && stickyFallbackSelection.Account != nil {
+			decision.Layer = stickyFallbackLayer
+			decision.StickyPreviousHit = stickyFallbackPrevious
+			decision.StickySessionHit = stickyFallbackSession
+			decision.SelectedAccountID = stickyFallbackSelection.Account.ID
+			decision.SelectedAccountType = stickyFallbackSelection.Account.Type
+			return stickyFallbackSelection, decision, nil
+		}
 		return nil, decision, err
 	}
 	if selection != nil && selection.Account != nil {
 		decision.SelectedAccountID = selection.Account.ID
 		decision.SelectedAccountType = selection.Account.Type
+		return selection, decision, nil
+	}
+	if stickyFallbackSelection != nil && stickyFallbackSelection.Account != nil {
+		decision.Layer = stickyFallbackLayer
+		decision.StickyPreviousHit = stickyFallbackPrevious
+		decision.StickySessionHit = stickyFallbackSession
+		decision.SelectedAccountID = stickyFallbackSelection.Account.ID
+		decision.SelectedAccountType = stickyFallbackSelection.Account.Type
+		return stickyFallbackSelection, decision, nil
 	}
 	return selection, decision, nil
 }
@@ -929,6 +969,28 @@ func clamp01(value float64) float64 {
 	default:
 		return value
 	}
+}
+
+func cloneOpenAIExcludedIDs(src map[int64]struct{}) map[int64]struct{} {
+	if len(src) == 0 {
+		return nil
+	}
+	cloned := make(map[int64]struct{}, len(src))
+	for accountID := range src {
+		cloned[accountID] = struct{}{}
+	}
+	return cloned
+}
+
+func addOpenAIExcludedID(excluded map[int64]struct{}, accountID int64) map[int64]struct{} {
+	if accountID <= 0 {
+		return excluded
+	}
+	if excluded == nil {
+		excluded = make(map[int64]struct{}, 1)
+	}
+	excluded[accountID] = struct{}{}
+	return excluded
 }
 
 func calcLoadSkewByMoments(sum float64, sumSquares float64, count int) float64 {

@@ -1871,7 +1871,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	if passthroughEnabled {
 		// 透传分支只需要轻量提取字段，避免热路径全量 Unmarshal。
 		reasoningEffort := extractOpenAIReasoningEffortFromBody(body, reqModel)
-		return s.forwardOpenAIPassthrough(ctx, c, account, originalBody, reqModel, reasoningEffort, reqStream, startTime)
+		return s.forwardOpenAIPassthrough(ctx, c, account, originalBody, reqModel, reasoningEffort, reqStream, isCodexCLI, startTime)
 	}
 
 	reqBody, err := getOpenAIRequestBodyMap(c, body)
@@ -2486,6 +2486,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	reqModel string,
 	reasoningEffort *string,
 	reqStream bool,
+	isCodexCLI bool,
 	startTime time.Time,
 ) (*OpenAIForwardResult, error) {
 	if account != nil && account.Type == AccountTypeOAuth {
@@ -2512,7 +2513,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			return nil, fmt.Errorf("openai passthrough rejected before upstream: %s", rejectReason)
 		}
 
-		normalizedBody, normalized, err := normalizeOpenAIPassthroughOAuthBody(body, isOpenAIResponsesCompactPath(c))
+		normalizedBody, normalized, err := normalizeOpenAIPassthroughOAuthBody(body, isOpenAIResponsesCompactPath(c), isCodexCLI)
 		if err != nil {
 			return nil, err
 		}

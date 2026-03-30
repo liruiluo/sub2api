@@ -237,7 +237,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionSticky(t *testin
 	}
 }
 
-func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyBusyKeepsSticky(t *testing.T) {
+func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyBusyFallsBackToAvailableSibling(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(10100)
 	accounts := []Account{
@@ -306,12 +306,91 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyBusyKeepsS
 	require.NoError(t, err)
 	require.NotNil(t, selection)
 	require.NotNil(t, selection.Account)
-	require.Equal(t, int64(21001), selection.Account.ID, "busy sticky account should remain selected")
-	require.False(t, selection.Acquired)
-	require.NotNil(t, selection.WaitPlan)
-	require.Equal(t, int64(21001), selection.WaitPlan.AccountID)
-	require.Equal(t, openAIAccountScheduleLayerSessionSticky, decision.Layer)
-	require.True(t, decision.StickySessionHit)
+	require.Equal(t, int64(21002), selection.Account.ID, "busy sticky account should fall back to an available sibling")
+	require.True(t, selection.Acquired)
+	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+	require.False(t, decision.StickySessionHit)
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
+func TestOpenAIGatewayService_SelectAccountWithScheduler_PreviousResponseBusyFallsBackToAvailableSibling(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(10101)
+	accounts := []Account{
+		{
+			ID:          22001,
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeAPIKey,
+			Status:      StatusActive,
+			Schedulable: true,
+			Concurrency: 1,
+			Priority:    0,
+			Extra: map[string]any{
+				"openai_apikey_responses_websockets_v2_enabled": true,
+			},
+		},
+		{
+			ID:          22002,
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeAPIKey,
+			Status:      StatusActive,
+			Schedulable: true,
+			Concurrency: 1,
+			Priority:    9,
+			Extra: map[string]any{
+				"openai_apikey_responses_websockets_v2_enabled": true,
+			},
+		},
+	}
+	cfg := newOpenAIWSV2TestConfig()
+	cfg.Gateway.Scheduling.StickySessionMaxWaiting = 2
+	cfg.Gateway.Scheduling.StickySessionWaitTimeout = 45 * time.Second
+	concurrencyCache := stubConcurrencyCache{
+		acquireResults: map[int64]bool{
+			22001: false,
+			22002: true,
+		},
+		waitCounts: map[int64]int{
+			22001: 999,
+		},
+		loadMap: map[int64]*AccountLoadInfo{
+			22001: {AccountID: 22001, LoadRate: 95, WaitingCount: 9},
+			22002: {AccountID: 22002, LoadRate: 1, WaitingCount: 0},
+		},
+	}
+	cache := &stubGatewayCache{}
+	store := NewOpenAIWSStateStore(cache)
+	svc := &OpenAIGatewayService{
+		accountRepo:        stubOpenAIAccountRepo{accounts: accounts},
+		cache:              cache,
+		cfg:                cfg,
+		concurrencyService: NewConcurrencyService(concurrencyCache),
+		openaiWSStateStore: store,
+	}
+
+	require.NoError(t, store.BindResponseAccount(ctx, groupID, "resp_prev_busy_fallback", 22001, time.Hour))
+
+	selection, decision, err := svc.SelectAccountWithScheduler(
+		ctx,
+		&groupID,
+		"resp_prev_busy_fallback",
+		"session_hash_prev_busy_fallback",
+		"gpt-5.1",
+		nil,
+		OpenAIUpstreamTransportAny,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, int64(22002), selection.Account.ID, "busy previous_response sticky account should fall back to an available sibling")
+	require.True(t, selection.Acquired)
+	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+	require.False(t, decision.StickyPreviousHit)
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
 }
 
 func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionSticky_ForceHTTP(t *testing.T) {
