@@ -147,11 +147,13 @@ func TestCalculateOpenAI429ResetTime_ReversedWindowOrder(t *testing.T) {
 type openAI429SnapshotRepo struct {
 	mockAccountRepoForGemini
 	rateLimitedID int64
+	rateLimitedAt time.Time
 	updatedExtra  map[string]any
 }
 
-func (r *openAI429SnapshotRepo) SetRateLimited(_ context.Context, id int64, _ time.Time) error {
+func (r *openAI429SnapshotRepo) SetRateLimited(_ context.Context, id int64, resetAt time.Time) error {
 	r.rateLimitedID = id
+	r.rateLimitedAt = resetAt
 	return nil
 }
 
@@ -186,6 +188,43 @@ func TestHandle429_OpenAIPersistsCodexSnapshotImmediately(t *testing.T) {
 	}
 	if got := repo.updatedExtra["codex_7d_used_percent"]; got != 100.0 {
 		t.Fatalf("codex_7d_used_percent = %v, want 100", got)
+	}
+}
+
+func TestHandle429_OpenAIUsageLimitReachedFromBodySetsRateLimit(t *testing.T) {
+	repo := &openAI429SnapshotRepo{}
+	svc := NewRateLimitService(repo, nil, nil, nil, nil)
+	account := &Account{ID: 456, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+
+	before := time.Now()
+	body := []byte(`{"error":{"type":"usage_limit_reached","message":"The usage limit has been reached","resets_in_seconds":120}}`)
+	svc.handle429(context.Background(), account, http.Header{}, body)
+	after := time.Now()
+
+	if repo.rateLimitedID != account.ID {
+		t.Fatalf("rateLimitedID = %d, want %d", repo.rateLimitedID, account.ID)
+	}
+
+	minExpected := before.Add(120 * time.Second)
+	maxExpected := after.Add(120 * time.Second)
+	if repo.rateLimitedAt.Before(minExpected.Add(-time.Second)) || repo.rateLimitedAt.After(maxExpected.Add(time.Second)) {
+		t.Fatalf("rateLimitedAt = %v, want within [%v, %v]", repo.rateLimitedAt, minExpected, maxExpected)
+	}
+}
+
+func TestHandle429_OpenAINoResetMetadataSkipsPersistentRateLimit(t *testing.T) {
+	repo := &openAI429SnapshotRepo{}
+	svc := NewRateLimitService(repo, nil, nil, nil, nil)
+	account := &Account{ID: 789, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+
+	body := []byte(`{"error":{"type":"rate_limit_error","message":"Too many pending requests, please retry later"}}`)
+	svc.handle429(context.Background(), account, http.Header{}, body)
+
+	if repo.rateLimitedID != 0 {
+		t.Fatalf("rateLimitedID = %d, want 0", repo.rateLimitedID)
+	}
+	if !repo.rateLimitedAt.IsZero() {
+		t.Fatalf("rateLimitedAt = %v, want zero", repo.rateLimitedAt)
 	}
 }
 
