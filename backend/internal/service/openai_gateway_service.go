@@ -4780,6 +4780,7 @@ func buildCodexUsageExtraUpdates(snapshot *OpenAICodexUsageSnapshot, fallbackNow
 
 	baseTime := codexSnapshotBaseTime(snapshot, fallbackNow)
 	updates := make(map[string]any)
+	normalized := snapshot.Normalize()
 
 	// 保存原始 primary/secondary 字段，便于排查问题
 	if snapshot.PrimaryUsedPercent != nil {
@@ -4814,7 +4815,7 @@ func buildCodexUsageExtraUpdates(snapshot *OpenAICodexUsageSnapshot, fallbackNow
 	}
 
 	// 归一化到 5h/7d 规范字段
-	if normalized := snapshot.Normalize(); normalized != nil {
+	if normalized != nil {
 		if normalized.Used5hPercent != nil {
 			updates["codex_5h_used_percent"] = *normalized.Used5hPercent
 		}
@@ -4841,6 +4842,16 @@ func buildCodexUsageExtraUpdates(snapshot *OpenAICodexUsageSnapshot, fallbackNow
 		}
 	}
 
+	if normalized != nil {
+		if resetAt := codexRateLimitResetAtFromSnapshot(snapshot, baseTime); resetAt != nil {
+			updates[codexRateLimitActiveExtraKey] = true
+			updates[codexRateLimitResetAtExtraKey] = resetAt.UTC().Format(time.RFC3339)
+		} else if normalized.Used5hPercent != nil || normalized.Used7dPercent != nil {
+			updates[codexRateLimitActiveExtraKey] = false
+			updates[codexRateLimitResetAtExtraKey] = nil
+		}
+	}
+
 	return updates
 }
 
@@ -4858,11 +4869,13 @@ func codexRateLimitResetAtFromSnapshot(snapshot *OpenAICodexUsageSnapshot, fallb
 	}
 	baseTime := codexSnapshotBaseTime(snapshot, fallbackNow)
 	if codexUsagePercentExhausted(normalized.Used7dPercent) && normalized.Reset7dSeconds != nil {
-		resetAt := baseTime.Add(time.Duration(*normalized.Reset7dSeconds) * time.Second)
+		seconds := max(*normalized.Reset7dSeconds, 0)
+		resetAt := baseTime.Add(time.Duration(seconds) * time.Second)
 		return &resetAt
 	}
 	if codexUsagePercentExhausted(normalized.Used5hPercent) && normalized.Reset5hSeconds != nil {
-		resetAt := baseTime.Add(time.Duration(*normalized.Reset5hSeconds) * time.Second)
+		seconds := max(*normalized.Reset5hSeconds, 0)
+		resetAt := baseTime.Add(time.Duration(seconds) * time.Second)
 		return &resetAt
 	}
 	return nil

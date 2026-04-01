@@ -102,6 +102,12 @@ func TestBuildCodexUsageExtraUpdates_UsesSnapshotUpdatedAt(t *testing.T) {
 	if got := updates["codex_7d_reset_at"]; got != "2026-02-17T10:00:00Z" {
 		t.Fatalf("codex_7d_reset_at = %v, want %s", got, "2026-02-17T10:00:00Z")
 	}
+	if got := updates[codexRateLimitActiveExtraKey]; got != false {
+		t.Fatalf("codex_rate_limit_active = %v, want false", got)
+	}
+	if got, ok := updates[codexRateLimitResetAtExtraKey]; !ok || got != nil {
+		t.Fatalf("codex_rate_limit_reset_at = %v, want nil", got)
+	}
 }
 
 func TestBuildCodexUsageExtraUpdates_FallbackToNowWhenUpdatedAtInvalid(t *testing.T) {
@@ -158,6 +164,12 @@ func TestBuildCodexUsageExtraUpdates_ClampNegativeResetSeconds(t *testing.T) {
 	}
 	if got := updates["codex_5h_reset_at"]; got != "2026-02-16T10:00:00Z" {
 		t.Fatalf("codex_5h_reset_at = %v, want %s", got, "2026-02-16T10:00:00Z")
+	}
+	if got := updates[codexRateLimitActiveExtraKey]; got != true {
+		t.Fatalf("codex_rate_limit_active = %v, want true", got)
+	}
+	if got := updates[codexRateLimitResetAtExtraKey]; got != "2026-02-16T10:00:00Z" {
+		t.Fatalf("codex_rate_limit_reset_at = %v, want %s", got, "2026-02-16T10:00:00Z")
 	}
 }
 
