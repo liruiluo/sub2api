@@ -43,13 +43,12 @@ func TestMatchWildcard(t *testing.T) {
 	}
 }
 
-func TestMatchWildcardMappingResult(t *testing.T) {
+func TestMatchWildcardMapping(t *testing.T) {
 	tests := []struct {
 		name           string
 		mapping        map[string]string
 		requestedModel string
 		expected       string
-		matched        bool
 	}{
 		// 精确匹配优先于通配符
 		{
@@ -60,7 +59,6 @@ func TestMatchWildcardMappingResult(t *testing.T) {
 			},
 			requestedModel: "claude-sonnet-4-5",
 			expected:       "claude-sonnet-4-5-exact",
-			matched:        true,
 		},
 
 		// 最长通配符优先
@@ -73,7 +71,6 @@ func TestMatchWildcardMappingResult(t *testing.T) {
 			},
 			requestedModel: "claude-sonnet-4-5",
 			expected:       "claude-sonnet-4-series",
-			matched:        true,
 		},
 
 		// 单个通配符
@@ -84,7 +81,6 @@ func TestMatchWildcardMappingResult(t *testing.T) {
 			},
 			requestedModel: "claude-opus-4-5",
 			expected:       "claude-mapped",
-			matched:        true,
 		},
 
 		// 无匹配返回原始模型
@@ -95,7 +91,6 @@ func TestMatchWildcardMappingResult(t *testing.T) {
 			},
 			requestedModel: "gemini-3-flash",
 			expected:       "gemini-3-flash",
-			matched:        false,
 		},
 
 		// 空映射返回原始模型
@@ -104,7 +99,6 @@ func TestMatchWildcardMappingResult(t *testing.T) {
 			mapping:        map[string]string{},
 			requestedModel: "claude-sonnet-4-5",
 			expected:       "claude-sonnet-4-5",
-			matched:        false,
 		},
 
 		// Gemini 模型映射
@@ -116,15 +110,14 @@ func TestMatchWildcardMappingResult(t *testing.T) {
 			},
 			requestedModel: "gemini-3-flash-preview",
 			expected:       "gemini-3-pro-high",
-			matched:        true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, matched := matchWildcardMappingResult(tt.mapping, tt.requestedModel)
-			if result != tt.expected || matched != tt.matched {
-				t.Errorf("matchWildcardMappingResult(%v, %q) = (%q, %v), want (%q, %v)", tt.mapping, tt.requestedModel, result, matched, tt.expected, tt.matched)
+			result := matchWildcardMapping(tt.mapping, tt.requestedModel)
+			if result != tt.expected {
+				t.Errorf("matchWildcardMapping(%v, %q) = %q, want %q", tt.mapping, tt.requestedModel, result, tt.expected)
 			}
 		})
 	}
@@ -133,7 +126,6 @@ func TestMatchWildcardMappingResult(t *testing.T) {
 func TestAccountIsModelSupported(t *testing.T) {
 	tests := []struct {
 		name           string
-		platform       string
 		credentials    map[string]any
 		requestedModel string
 		expected       bool
@@ -186,17 +178,6 @@ func TestAccountIsModelSupported(t *testing.T) {
 			expected:       true,
 		},
 		{
-			name:     "gemini customtools alias matches normalized mapping",
-			platform: PlatformGemini,
-			credentials: map[string]any{
-				"model_mapping": map[string]any{
-					"gemini-3.1-pro-preview": "gemini-3.1-pro-preview",
-				},
-			},
-			requestedModel: "gemini-3.1-pro-preview-customtools",
-			expected:       true,
-		},
-		{
 			name: "wildcard match not supported",
 			credentials: map[string]any{
 				"model_mapping": map[string]any{
@@ -211,7 +192,6 @@ func TestAccountIsModelSupported(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			account := &Account{
-				Platform:    tt.platform,
 				Credentials: tt.credentials,
 			}
 			result := account.IsModelSupported(tt.requestedModel)
@@ -225,7 +205,6 @@ func TestAccountIsModelSupported(t *testing.T) {
 func TestAccountGetMappedModel(t *testing.T) {
 	tests := []struct {
 		name           string
-		platform       string
 		credentials    map[string]any
 		requestedModel string
 		expected       string
@@ -236,13 +215,6 @@ func TestAccountGetMappedModel(t *testing.T) {
 			credentials:    nil,
 			requestedModel: "claude-sonnet-4-5",
 			expected:       "claude-sonnet-4-5",
-		},
-		{
-			name:           "no mapping preserves gemini customtools model",
-			platform:       PlatformGemini,
-			credentials:    nil,
-			requestedModel: "gemini-3.1-pro-preview-customtools",
-			expected:       "gemini-3.1-pro-preview-customtools",
 		},
 
 		// 精确匹配
@@ -272,29 +244,6 @@ func TestAccountGetMappedModel(t *testing.T) {
 
 		// 无匹配返回原始模型
 		{
-			name:     "gemini customtools alias resolves through normalized mapping",
-			platform: PlatformGemini,
-			credentials: map[string]any{
-				"model_mapping": map[string]any{
-					"gemini-3.1-pro-preview": "gemini-3.1-pro-preview",
-				},
-			},
-			requestedModel: "gemini-3.1-pro-preview-customtools",
-			expected:       "gemini-3.1-pro-preview",
-		},
-		{
-			name:     "gemini customtools exact mapping wins over normalized fallback",
-			platform: PlatformGemini,
-			credentials: map[string]any{
-				"model_mapping": map[string]any{
-					"gemini-3.1-pro-preview":             "gemini-3.1-pro-preview",
-					"gemini-3.1-pro-preview-customtools": "gemini-3.1-pro-preview-customtools",
-				},
-			},
-			requestedModel: "gemini-3.1-pro-preview-customtools",
-			expected:       "gemini-3.1-pro-preview-customtools",
-		},
-		{
 			name: "no match returns original",
 			credentials: map[string]any{
 				"model_mapping": map[string]any{
@@ -309,7 +258,6 @@ func TestAccountGetMappedModel(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			account := &Account{
-				Platform:    tt.platform,
 				Credentials: tt.credentials,
 			}
 			result := account.GetMappedModel(tt.requestedModel)
@@ -320,91 +268,59 @@ func TestAccountGetMappedModel(t *testing.T) {
 	}
 }
 
-func TestAccountResolveMappedModel(t *testing.T) {
+func TestAccountHasExplicitModelMapping(t *testing.T) {
 	tests := []struct {
 		name           string
-		platform       string
 		credentials    map[string]any
 		requestedModel string
-		expectedModel  string
-		expectedMatch  bool
+		expected       bool
 	}{
 		{
-			name:           "no mapping reports unmatched",
+			name:           "no mapping returns false",
 			credentials:    nil,
-			requestedModel: "gpt-5.4",
-			expectedModel:  "gpt-5.4",
-			expectedMatch:  false,
+			requestedModel: "qwen3-coder-plus",
+			expected:       false,
 		},
 		{
-			name: "exact passthrough mapping still counts as matched",
+			name: "identity passthrough exact mapping counts as explicit",
 			credentials: map[string]any{
 				"model_mapping": map[string]any{
-					"gpt-5.4": "gpt-5.4",
+					"qwen3-coder-plus": "qwen3-coder-plus",
 				},
 			},
-			requestedModel: "gpt-5.4",
-			expectedModel:  "gpt-5.4",
-			expectedMatch:  true,
+			requestedModel: "qwen3-coder-plus",
+			expected:       true,
 		},
 		{
-			name: "wildcard passthrough mapping still counts as matched",
+			name: "wildcard mapping counts as explicit",
+			credentials: map[string]any{
+				"model_mapping": map[string]any{
+					"qwen3-*": "qwen3-coder-plus",
+				},
+			},
+			requestedModel: "qwen3-max-2026-01-23",
+			expected:       true,
+		},
+		{
+			name: "non-matching mapping returns false",
 			credentials: map[string]any{
 				"model_mapping": map[string]any{
 					"gpt-*": "gpt-5.4",
 				},
 			},
-			requestedModel: "gpt-5.4",
-			expectedModel:  "gpt-5.4",
-			expectedMatch:  true,
-		},
-		{
-			name:     "gemini customtools alias reports normalized match",
-			platform: PlatformGemini,
-			credentials: map[string]any{
-				"model_mapping": map[string]any{
-					"gemini-3.1-pro-preview": "gemini-3.1-pro-preview",
-				},
-			},
-			requestedModel: "gemini-3.1-pro-preview-customtools",
-			expectedModel:  "gemini-3.1-pro-preview",
-			expectedMatch:  true,
-		},
-		{
-			name:     "gemini customtools exact mapping reports exact match",
-			platform: PlatformGemini,
-			credentials: map[string]any{
-				"model_mapping": map[string]any{
-					"gemini-3.1-pro-preview":             "gemini-3.1-pro-preview",
-					"gemini-3.1-pro-preview-customtools": "gemini-3.1-pro-preview-customtools",
-				},
-			},
-			requestedModel: "gemini-3.1-pro-preview-customtools",
-			expectedModel:  "gemini-3.1-pro-preview-customtools",
-			expectedMatch:  true,
-		},
-		{
-			name: "missing mapping reports unmatched",
-			credentials: map[string]any{
-				"model_mapping": map[string]any{
-					"gpt-5.2": "gpt-5.2",
-				},
-			},
-			requestedModel: "gpt-5.4",
-			expectedModel:  "gpt-5.4",
-			expectedMatch:  false,
+			requestedModel: "qwen3-coder-plus",
+			expected:       false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			account := &Account{
-				Platform:    tt.platform,
 				Credentials: tt.credentials,
 			}
-			mappedModel, matched := account.ResolveMappedModel(tt.requestedModel)
-			if mappedModel != tt.expectedModel || matched != tt.expectedMatch {
-				t.Fatalf("ResolveMappedModel(%q) = (%q, %v), want (%q, %v)", tt.requestedModel, mappedModel, matched, tt.expectedModel, tt.expectedMatch)
+			result := account.HasExplicitModelMapping(tt.requestedModel)
+			if result != tt.expected {
+				t.Errorf("HasExplicitModelMapping(%q) = %v, want %v", tt.requestedModel, result, tt.expected)
 			}
 		})
 	}

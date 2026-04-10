@@ -24,6 +24,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/util/urlvalidator"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/tidwall/gjson"
 )
 
 // sseDataPrefix matches SSE data lines with optional whitespace after colon.
@@ -462,6 +463,8 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 			return s.sendErrorAndEnd(c, fmt.Sprintf("Invalid base URL: %s", err.Error()))
 		}
 		apiURL = strings.TrimSuffix(normalizedBaseURL, "/") + "/responses"
+
+		return s.testOpenAIAPIKeyAccountConnection(c, ctx, account, testModelID, apiURL, authToken)
 	} else {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Unsupported account type: %s", account.Type))
 	}
@@ -541,6 +544,140 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 
 	// Process SSE stream
 	return s.processOpenAIStream(c, resp.Body)
+}
+
+func (s *AccountTestService) testOpenAIAPIKeyAccountConnection(
+	c *gin.Context,
+	ctx context.Context,
+	account *Account,
+	modelID string,
+	apiURL string,
+	authToken string,
+) error {
+	if account.IsOpenAIChatCompletionsCompatEnabled() {
+		return s.testOpenAIAPIKeyChatCompatConnection(c, ctx, account, modelID, authToken)
+	}
+
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	c.Writer.Flush()
+
+	payload := createOpenAITestPayload(modelID, false)
+	payload["stream"] = false
+	payloadBytes, _ := json.Marshal(payload)
+
+	s.sendEvent(c, TestEvent{Type: "test_start", Model: modelID})
+
+	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(payloadBytes))
+	if err != nil {
+		return s.sendErrorAndEnd(c, "Failed to create request")
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+authToken)
+
+	proxyURL := ""
+	if account.ProxyID != nil && account.Proxy != nil {
+		proxyURL = account.Proxy.URL()
+	}
+
+	resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Request failed: %s", err.Error()))
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	bodyBytes, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to read response body: %s", readErr.Error()))
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		if isOpenAIChatCompletionsCompatError(resp.StatusCode, bodyBytes) {
+			updates := map[string]any{openAIAPIKeyChatCompletionsCompatExtraKey: true}
+			mergeAccountExtra(account, updates)
+			if s.accountRepo != nil {
+				_ = s.accountRepo.UpdateExtra(ctx, account.ID, updates)
+			}
+			return s.testOpenAIAPIKeyChatCompatConnection(c, ctx, account, modelID, authToken)
+		}
+		return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(bodyBytes)))
+	}
+
+	if content := extractOpenAIResponseContent(bodyBytes); content != "" {
+		s.sendEvent(c, TestEvent{Type: "content", Text: content})
+	}
+	s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
+	return nil
+}
+
+func (s *AccountTestService) testOpenAIAPIKeyChatCompatConnection(
+	c *gin.Context,
+	ctx context.Context,
+	account *Account,
+	modelID string,
+	authToken string,
+) error {
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	c.Writer.Flush()
+
+	s.sendEvent(c, TestEvent{Type: "test_start", Model: modelID})
+
+	baseURL := account.GetOpenAIBaseURL()
+	if baseURL == "" {
+		baseURL = "https://api.openai.com"
+	}
+	normalizedBaseURL, err := s.validateUpstreamBaseURL(baseURL)
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Invalid base URL: %s", err.Error()))
+	}
+	apiURL := buildOpenAIChatCompletionsURL(normalizedBaseURL)
+	payload := map[string]any{
+		"model": modelID,
+		"messages": []map[string]any{{
+			"role":    "user",
+			"content": "hi",
+		}},
+		"stream": false,
+	}
+	payloadBytes, _ := json.Marshal(payload)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(payloadBytes))
+	if err != nil {
+		return s.sendErrorAndEnd(c, "Failed to create compat request")
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+authToken)
+
+	proxyURL := ""
+	if account.ProxyID != nil && account.Proxy != nil {
+		proxyURL = account.Proxy.URL()
+	}
+
+	resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Compat request failed: %s", err.Error()))
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	bodyBytes, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to read compat response body: %s", readErr.Error()))
+	}
+	if resp.StatusCode != http.StatusOK {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Compat API returned %d: %s", resp.StatusCode, string(bodyBytes)))
+	}
+
+	content := strings.TrimSpace(gjson.GetBytes(bodyBytes, "choices.0.message.content").String())
+	if content != "" {
+		s.sendEvent(c, TestEvent{Type: "content", Text: content})
+	}
+	s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
+	return nil
 }
 
 // testGeminiAccountConnection tests a Gemini account's connection
@@ -928,6 +1065,46 @@ func createOpenAITestPayload(modelID string, isOAuth bool) map[string]any {
 	payload["instructions"] = openai.DefaultInstructions
 
 	return payload
+}
+
+func extractOpenAIResponseContent(body []byte) string {
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return ""
+	}
+
+	if output, ok := payload["output"].([]any); ok {
+		var parts []string
+		for _, item := range output {
+			row, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			contentItems, _ := row["content"].([]any)
+			for _, contentItem := range contentItems {
+				contentRow, ok := contentItem.(map[string]any)
+				if !ok {
+					continue
+				}
+				if text, ok := contentRow["text"].(string); ok && strings.TrimSpace(text) != "" {
+					parts = append(parts, text)
+				}
+			}
+		}
+		if len(parts) > 0 {
+			return strings.Join(parts, "")
+		}
+	}
+
+	if choices, ok := payload["choices"].([]any); ok && len(choices) > 0 {
+		choice, _ := choices[0].(map[string]any)
+		message, _ := choice["message"].(map[string]any)
+		if text, ok := message["content"].(string); ok {
+			return text
+		}
+	}
+
+	return ""
 }
 
 // processClaudeStream processes the SSE stream from Claude API

@@ -1783,6 +1783,23 @@ func (s *OpenAIGatewayService) shouldFailoverUpstreamError(statusCode int) bool 
 	}
 }
 
+func shouldFailoverOpenAIRequestError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)
+}
+
+func shouldFailoverOpenAIStreamingFailure(c *gin.Context, firstTokenMs *int, clientDisconnected bool) bool {
+	if clientDisconnected || firstTokenMs != nil {
+		return false
+	}
+	if c == nil || c.Writer == nil {
+		return true
+	}
+	return !c.Writer.Written()
+}
+
 func (s *OpenAIGatewayService) shouldFailoverOpenAIUpstreamResponse(statusCode int, upstreamMsg string, upstreamBody []byte) bool {
 	if s.shouldFailoverUpstreamError(statusCode) {
 		return true
@@ -2088,6 +2105,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	// Capture upstream request body for ops retry of this attempt.
 	setOpsUpstreamRequestBody(c, body)
 
+	if account.IsOpenAIChatCompletionsCompatEnabled() {
+		return s.forwardOpenAIResponsesViaChatCompletionsCompat(ctx, c, account, body, startTime, originalModel, upstreamModel, reqStream)
+	}
+
 	// 命中 WS 时仅走 WebSocket Mode；不再自动回退 HTTP。
 	if wsDecision.Transport == OpenAIUpstreamTransportResponsesWebsocketV2 {
 		wsReqBody := reqBody
@@ -2323,18 +2344,21 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			// Ensure the client receives an error response (handlers assume Forward writes on non-failover errors).
 			safeErr := sanitizeUpstreamErrorMessage(err.Error())
 			setOpsUpstreamError(c, 0, safeErr, "")
-			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
-				Platform:           account.Platform,
-				AccountID:          account.ID,
-				AccountName:        account.Name,
-				UpstreamStatusCode: 0,
-				Kind:               "request_error",
-				Message:            safeErr,
-			})
-			c.JSON(http.StatusBadGateway, gin.H{
-				"error": gin.H{
-					"type":    "upstream_error",
-					"message": "Upstream request failed",
+		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+			Platform:           account.Platform,
+			AccountID:          account.ID,
+			AccountName:        account.Name,
+			UpstreamStatusCode: 0,
+			Kind:               "request_error",
+			Message:            safeErr,
+		})
+		if shouldFailoverOpenAIRequestError(err) {
+			return nil, &UpstreamFailoverError{StatusCode: http.StatusBadGateway}
+		}
+		c.JSON(http.StatusBadGateway, gin.H{
+			"error": gin.H{
+				"type":    "upstream_error",
+				"message": "Upstream request failed",
 				},
 			})
 			return nil, fmt.Errorf("upstream request failed: %s", safeErr)
@@ -2345,6 +2369,11 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 			_ = resp.Body.Close()
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
+
+			if account.IsOpenAIApiKey() && isOpenAIChatCompletionsCompatError(resp.StatusCode, respBody) {
+				s.markOpenAIChatCompletionsCompat(ctx, account)
+				return s.forwardOpenAIResponsesViaChatCompletionsCompat(ctx, c, account, body, startTime, originalModel, upstreamModel, reqStream)
+			}
 
 			upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 			upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)

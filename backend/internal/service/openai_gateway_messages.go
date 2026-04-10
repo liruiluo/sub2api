@@ -133,11 +133,10 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
 
-	// Override session_id with a deterministic UUID derived from the isolated
-	// session key, ensuring different API keys produce different upstream sessions.
+	// Override session_id with a deterministic UUID derived from the sticky
+	// session key (buildUpstreamRequest may have set it to the raw value).
 	if promptCacheKey != "" {
-		apiKeyID := getAPIKeyIDFromContext(c)
-		upstreamReq.Header.Set("session_id", generateSessionUUID(isolateOpenAISessionID(apiKeyID, promptCacheKey)))
+		upstreamReq.Header.Set("session_id", generateSessionUUID(promptCacheKey))
 	}
 
 	// 7. Send request
@@ -157,6 +156,9 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 			Kind:               "request_error",
 			Message:            safeErr,
 		})
+		if shouldFailoverOpenAIRequestError(err) {
+			return nil, &UpstreamFailoverError{StatusCode: http.StatusBadGateway}
+		}
 		writeAnthropicError(c, http.StatusBadGateway, "api_error", "Upstream request failed")
 		return nil, fmt.Errorf("upstream request failed: %s", safeErr)
 	}
