@@ -257,6 +257,19 @@ func TestNormalizeCodexModel_Gpt53(t *testing.T) {
 	}
 }
 
+func TestNormalizeDeveloperRoleForCompat(t *testing.T) {
+	input := []any{
+		map[string]any{"type": "message", "role": "developer", "content": "keep rules"},
+		map[string]any{"type": "message", "role": "user", "content": "hi"},
+	}
+
+	require.True(t, normalizeDeveloperRoleForCompat(input))
+	first := input[0].(map[string]any)
+	second := input[1].(map[string]any)
+	require.Equal(t, "system", first["role"])
+	require.Equal(t, "user", second["role"])
+}
+
 func TestApplyCodexOAuthTransform_PreservesBareSparkModel(t *testing.T) {
 	reqBody := map[string]any{
 		"model": "gpt-5.3-codex-spark",

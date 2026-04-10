@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,14 +16,23 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 type queuedGatewayHTTPUpstream struct {
 	responses []*http.Response
 	requests  []*http.Request
+	bodies    [][]byte
 }
 
 func (u *queuedGatewayHTTPUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	if req.Body != nil {
+		body, _ := io.ReadAll(req.Body)
+		u.bodies = append(u.bodies, body)
+		req.Body = io.NopCloser(bytes.NewReader(body))
+	} else {
+		u.bodies = append(u.bodies, nil)
+	}
 	u.requests = append(u.requests, req)
 	if len(u.responses) == 0 {
 		return nil, fmt.Errorf("no mocked response")
@@ -95,6 +105,37 @@ func TestOpenAIGatewayService_ForwardResponsesCompatDirectWhenFlagged(t *testing
 	require.NoError(t, err)
 	require.Len(t, upstream.requests, 1)
 	require.Equal(t, "https://api.daiju.live/v1/chat/completions", upstream.requests[0].URL.String())
+	require.False(t, strings.Contains(rec.Body.String(), "upstream_error"))
+}
+
+func TestOpenAIGatewayService_ForwardResponsesCompatDirectNormalizesDeveloperRole(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"gpt-5.4","input":[{"type":"message","role":"developer","content":"keep rules"},{"type":"message","role":"user","content":"Say OK"}],"stream":false}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	upstream := &queuedGatewayHTTPUpstream{responses: []*http.Response{
+		newJSONResponse(http.StatusOK, `{"id":"chatcmpl_test","object":"chat.completion","created":1,"model":"gpt-5.4","choices":[{"index":0,"message":{"role":"assistant","content":"OK"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`),
+	}}
+	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+	account := &Account{
+		ID:          131,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{"api_key": "sk-test", "base_url": "https://api.daiju.live/v1"},
+		Extra:       map[string]any{openAIAPIKeyChatCompletionsCompatExtraKey: true},
+	}
+
+	_, err := svc.Forward(context.Background(), c, account, body)
+	require.NoError(t, err)
+	require.Len(t, upstream.requests, 1)
+	require.Len(t, upstream.bodies, 1)
+	require.Equal(t, "https://api.daiju.live/v1/chat/completions", upstream.requests[0].URL.String())
+	require.Equal(t, "system", gjson.GetBytes(upstream.bodies[0], "messages.0.role").String())
+	require.Equal(t, "user", gjson.GetBytes(upstream.bodies[0], "messages.1.role").String())
 	require.False(t, strings.Contains(rec.Body.String(), "upstream_error"))
 }
 

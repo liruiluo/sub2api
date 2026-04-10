@@ -1990,6 +1990,14 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 	}
 
+	if account.IsOpenAIChatCompletionsCompatEnabled() {
+		if normalizeDeveloperRoleForCompat(reqBody["input"]) {
+			bodyModified = true
+			disablePatch()
+			logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Normalized developer role to system for compat upstream (account: %s)", account.Name)
+		}
+	}
+
 	if account.Type == AccountTypeOAuth {
 		codexResult := applyCodexOAuthTransform(reqBody, isCodexCLI, isOpenAIResponsesCompactPath(c))
 		if codexResult.Modified {
