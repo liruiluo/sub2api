@@ -983,6 +983,60 @@ func TestOpenAIGatewayService_APIKeyPassthrough_PreservesBodyAndUsesResponsesEnd
 	require.Empty(t, upstream.lastReq.Header.Get("X-Test"))
 }
 
+func TestOpenAIGatewayService_APIKeyPassthrough_PreservesExplicitCodexLikeModels(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name  string
+		model string
+	}{
+		{name: "bare codex alias preserved", model: "codex"},
+		{name: "gpt-5 alias preserved", model: "gpt-5"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
+			c.Request.Header.Set("User-Agent", "curl/8.0")
+
+			originalBody := []byte(fmt.Sprintf(`{"model":%q,"stream":false,"input":[{"type":"text","text":"hi"}]}`, tt.model))
+			resp := &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}, "x-request-id": []string{"rid"}},
+				Body:       io.NopCloser(strings.NewReader(`{"output":[],"usage":{"input_tokens":1,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}`)),
+			}
+			upstream := &httpUpstreamRecorder{resp: resp}
+
+			svc := &OpenAIGatewayService{
+				cfg:          &config.Config{Gateway: config.GatewayConfig{ForceCodexCLI: false}},
+				httpUpstream: upstream,
+			}
+
+			account := &Account{
+				ID:             456,
+				Name:           "apikey-acc",
+				Platform:       PlatformOpenAI,
+				Type:           AccountTypeAPIKey,
+				Concurrency:    1,
+				Credentials:    map[string]any{"api_key": "sk-api-key", "base_url": "https://api.openai.com"},
+				Extra:          map[string]any{"openai_passthrough": true},
+				Status:         StatusActive,
+				Schedulable:    true,
+				RateMultiplier: f64p(1),
+			}
+
+			result, err := svc.Forward(context.Background(), c, account, originalBody)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.NotNil(t, upstream.lastReq)
+			require.Equal(t, originalBody, upstream.lastBody)
+			require.Equal(t, "https://api.openai.com/v1/responses", upstream.lastReq.URL.String())
+		})
+	}
+}
+
 func TestOpenAIGatewayService_OAuthPassthrough_WarnOnTimeoutHeadersForStream(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	logSink, restore := captureStructuredLog(t)
