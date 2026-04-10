@@ -2563,6 +2563,13 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	if err != nil {
 		return nil, err
 	}
+	body, err = normalizeOfficialOpenAIBareCodexPassthroughBody(body, upstreamReq.URL.String())
+	if err != nil {
+		return nil, err
+	}
+	if body != nil {
+		resetOpenAIPassthroughRequestBody(upstreamReq, body)
+	}
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -2785,6 +2792,39 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	}
 
 	return req, nil
+}
+
+func normalizeOfficialOpenAIBareCodexPassthroughBody(body []byte, targetURL string) ([]byte, error) {
+	if len(body) == 0 {
+		return body, nil
+	}
+	if !strings.HasPrefix(strings.TrimSpace(targetURL), openaiPlatformAPIURL) {
+		return body, nil
+	}
+
+	model := strings.TrimSpace(gjson.GetBytes(body, "model").String())
+	if !strings.EqualFold(model, "codex") {
+		return body, nil
+	}
+
+	normalizedBody, err := sjson.SetBytes(body, "model", "gpt-5-codex")
+	if err != nil {
+		return nil, fmt.Errorf("normalize official bare codex passthrough model: %w", err)
+	}
+	return normalizedBody, nil
+}
+
+func resetOpenAIPassthroughRequestBody(req *http.Request, body []byte) {
+	if req == nil {
+		return
+	}
+	cloned := append([]byte(nil), body...)
+	req.Body = io.NopCloser(bytes.NewReader(cloned))
+	req.ContentLength = int64(len(cloned))
+	req.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(cloned)), nil
+	}
+	req.Header.Set("Content-Length", strconv.Itoa(len(cloned)))
 }
 
 func shouldFailoverOpenAIPassthroughResponse(statusCode int) bool {
