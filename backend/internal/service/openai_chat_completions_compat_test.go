@@ -139,6 +139,57 @@ func TestOpenAIGatewayService_ForwardResponsesCompatDirectNormalizesDeveloperRol
 	require.False(t, strings.Contains(rec.Body.String(), "upstream_error"))
 }
 
+func TestOpenAIGatewayService_ForwardResponsesCompatDirectPreservesAPIKeyForwardModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name          string
+		requestModel  string
+		expectedModel string
+	}{
+		{
+			name:          "preserves bare codex alias",
+			requestModel:  "codex",
+			expectedModel: "codex",
+		},
+		{
+			name:          "preserves gpt-5 alias",
+			requestModel:  "gpt-5",
+			expectedModel: "gpt-5",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := []byte(fmt.Sprintf(`{"model":%q,"input":"Say OK","stream":false}`, tt.requestModel))
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+			c.Request.Header.Set("Content-Type", "application/json")
+
+			upstream := &queuedGatewayHTTPUpstream{responses: []*http.Response{
+				newJSONResponse(http.StatusOK, `{"id":"chatcmpl_test","object":"chat.completion","created":1,"model":"gpt-5.4","choices":[{"index":0,"message":{"role":"assistant","content":"OK"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`),
+			}}
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+			account := &Account{
+				ID:          131,
+				Platform:    PlatformOpenAI,
+				Type:        AccountTypeAPIKey,
+				Concurrency: 1,
+				Credentials: map[string]any{"api_key": "sk-test", "base_url": "https://api.daiju.live/v1"},
+				Extra:       map[string]any{openAIAPIKeyChatCompletionsCompatExtraKey: true},
+			}
+
+			_, err := svc.Forward(context.Background(), c, account, body)
+			require.NoError(t, err)
+			require.Len(t, upstream.requests, 1)
+			require.Len(t, upstream.bodies, 1)
+			require.Equal(t, "https://api.daiju.live/v1/chat/completions", upstream.requests[0].URL.String())
+			require.Equal(t, tt.expectedModel, gjson.GetBytes(upstream.bodies[0], "model").String())
+		})
+	}
+}
+
 
 func TestOpenAIGatewayService_ForwardResponsesCompatFallbackOnConvertRequestFailed(t *testing.T) {
 	gin.SetMode(gin.TestMode)
