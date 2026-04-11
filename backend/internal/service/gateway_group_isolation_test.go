@@ -452,3 +452,36 @@ func TestOpenAIGroupIsolation_SimpleMode_GroupedKeyWithoutMatchReturnsEmpty(t *t
 	require.NoError(t, err)
 	require.Empty(t, items, "OpenAI SimpleMode + grouped key 不应再回落到全平台账号池")
 }
+
+func TestSchedulerSnapshot_SimpleMode_GroupedKeyPreservesExplicitGroup(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(100)
+
+	accounts := []Account{
+		{ID: 1, Platform: PlatformOpenAI, Priority: 1, Status: StatusActive, Schedulable: true, AccountGroups: []AccountGroup{{GroupID: 100}}},
+		{ID: 2, Platform: PlatformOpenAI, Priority: 1, Status: StatusActive, Schedulable: true, AccountGroups: []AccountGroup{{GroupID: 200}}},
+		{ID: 3, Platform: PlatformOpenAI, Priority: 1, Status: StatusActive, Schedulable: true, AccountGroups: nil},
+	}
+	repo := newGroupAwareMockRepo(accounts)
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	cfg.Gateway.Scheduling.DbFallbackEnabled = true
+
+	snapshot := NewSchedulerSnapshotService(nil, nil, repo, nil, cfg)
+	bucket := snapshot.bucketFor(&groupID, PlatformOpenAI, SchedulerModeSingle)
+
+	require.Equal(t, int64(100), bucket.GroupID, "SimpleMode 下显式 group bucket 不应被压扁成 0")
+
+	list, _, err := snapshot.ListSchedulableAccounts(ctx, &groupID, PlatformOpenAI, false)
+	require.NoError(t, err)
+	require.Len(t, list, 1)
+	require.Equal(t, int64(1), list[0].ID, "SimpleMode snapshot + grouped key 应只返回该分组账号")
+}
+
+func TestSchedulerSnapshot_SimpleMode_ExplicitGroupIDsStayDistinct(t *testing.T) {
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	snapshot := NewSchedulerSnapshotService(nil, nil, nil, nil, cfg)
+
+	require.Equal(t, []int64{100, 200}, snapshot.normalizeGroupIDs([]int64{100, 200, 100}))
+	require.Equal(t, []int64{0}, snapshot.normalizeGroupIDs(nil))
+	require.Equal(t, []int64{0}, snapshot.normalizeGroupIDs([]int64{0, -1}))
+}
