@@ -2360,13 +2360,13 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				Kind:               "request_error",
 				Message:            safeErr,
 			})
-		if shouldFailoverOpenAIRequestError(err) {
-			return nil, &UpstreamFailoverError{StatusCode: http.StatusBadGateway}
-		}
-		c.JSON(http.StatusBadGateway, gin.H{
-			"error": gin.H{
-				"type":    "upstream_error",
-				"message": "Upstream request failed",
+			if shouldFailoverOpenAIRequestError(err) {
+				return nil, &UpstreamFailoverError{StatusCode: http.StatusBadGateway}
+			}
+			c.JSON(http.StatusBadGateway, gin.H{
+				"error": gin.H{
+					"type":    "upstream_error",
+					"message": "Upstream request failed",
 				},
 			})
 			return nil, fmt.Errorf("upstream request failed: %s", safeErr)

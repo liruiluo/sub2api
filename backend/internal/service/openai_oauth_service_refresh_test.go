@@ -131,5 +131,7 @@ func TestOpenAIOAuthService_RefreshAccountToken_RefreshFailureFallsBackToSession
 	require.Equal(t, "plus", info.PlanType)
 	require.Equal(t, "fallback@example.com", info.Email)
 	require.Equal(t, int32(1), atomic.LoadInt32(&client.refreshCalls))
-	require.Contains(t, seenCookie.Load().(string), "__Secure-next-auth.session-token=session-token-fallback")
+	cookie, ok := seenCookie.Load().(string)
+	require.True(t, ok)
+	require.Contains(t, cookie, "__Secure-next-auth.session-token=session-token-fallback")
 }
