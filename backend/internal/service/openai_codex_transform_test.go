@@ -264,8 +264,10 @@ func TestNormalizeDeveloperRoleForCompat(t *testing.T) {
 	}
 
 	require.True(t, normalizeDeveloperRoleForCompat(input))
-	first := input[0].(map[string]any)
-	second := input[1].(map[string]any)
+	first, ok := input[0].(map[string]any)
+	require.True(t, ok)
+	second, ok := input[1].(map[string]any)
+	require.True(t, ok)
 	require.Equal(t, "system", first["role"])
 	require.Equal(t, "user", second["role"])
 }

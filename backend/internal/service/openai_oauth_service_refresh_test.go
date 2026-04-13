@@ -90,8 +90,10 @@ func TestOpenAIOAuthService_RefreshAccountToken_NoRefreshTokenFallsBackToSession
 	require.Equal(t, "pro", info.PlanType)
 	require.Equal(t, "test@example.com", info.Email)
 	require.Zero(t, atomic.LoadInt32(&client.refreshCalls))
-	require.Contains(t, seenCookie.Load().(string), "__Secure-next-auth.session-token=session-token-abc")
-	require.Contains(t, seenCookie.Load().(string), "foo=bar")
+	cookie, ok := seenCookie.Load().(string)
+	require.True(t, ok)
+	require.Contains(t, cookie, "__Secure-next-auth.session-token=session-token-abc")
+	require.Contains(t, cookie, "foo=bar")
 }
 
 func TestOpenAIOAuthService_RefreshAccountToken_RefreshFailureFallsBackToSessionToken(t *testing.T) {

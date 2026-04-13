@@ -147,7 +147,7 @@ func responsesContentToChatMessageContent(role string, content json.RawMessage) 
 				continue
 			}
 			if onlyText {
-				textBuilder.WriteString(part.Text)
+				_, _ = textBuilder.WriteString(part.Text)
 			}
 			chatParts = append(chatParts, ChatContentPart{Type: "text", Text: part.Text})
 		case "input_image":
