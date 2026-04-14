@@ -361,3 +361,127 @@ func TestGroupIsolation_SimpleMode_GroupedAccountAlsoSchedulable(t *testing.T) {
 	require.NotNil(t, acc)
 	require.Equal(t, int64(1), acc.ID, "SimpleMode 应能调度已分组账号")
 }
+
+func TestGroupIsolation_SimpleMode_GroupedKeyStillIsolates(t *testing.T) {
+	// SimpleMode + groupID!=nil 时，应继续按分组隔离，而不是回落到全平台账号池。
+	ctx := context.Background()
+	groupID := int64(100)
+
+	accounts := []Account{
+		{ID: 1, Platform: PlatformOpenAI, Priority: 1, Status: StatusActive, Schedulable: true, AccountGroups: nil},
+		{ID: 2, Platform: PlatformOpenAI, Priority: 2, Status: StatusActive, Schedulable: true, AccountGroups: []AccountGroup{{GroupID: 200}}},
+		{ID: 3, Platform: PlatformOpenAI, Priority: 3, Status: StatusActive, Schedulable: true, AccountGroups: []AccountGroup{{GroupID: 100}}},
+	}
+	repo := newGroupAwareMockRepo(accounts)
+	cache := &mockGatewayCacheForPlatform{}
+
+	svc := &GatewayService{
+		accountRepo: repo,
+		cache:       cache,
+		cfg:         &config.Config{RunMode: config.RunModeSimple},
+	}
+
+	acc, err := svc.selectAccountForModelWithPlatform(ctx, &groupID, "", "", nil, PlatformOpenAI)
+	require.NoError(t, err, "SimpleMode + grouped key 应继续按分组内账号调度")
+	require.NotNil(t, acc)
+	require.Equal(t, int64(3), acc.ID, "SimpleMode + grouped key 不应串到未分组或错误分组账号")
+}
+
+func TestGroupIsolation_SimpleMode_GroupedKeyWithoutMatchingGroupStillFails(t *testing.T) {
+	// SimpleMode + groupID!=nil 且分组内无账号时，不应偷拿未分组或其他分组账号。
+	ctx := context.Background()
+	groupID := int64(100)
+
+	accounts := []Account{
+		{ID: 1, Platform: PlatformOpenAI, Priority: 1, Status: StatusActive, Schedulable: true, AccountGroups: nil},
+		{ID: 2, Platform: PlatformOpenAI, Priority: 2, Status: StatusActive, Schedulable: true, AccountGroups: []AccountGroup{{GroupID: 200}}},
+	}
+	repo := newGroupAwareMockRepo(accounts)
+	cache := &mockGatewayCacheForPlatform{}
+
+	svc := &GatewayService{
+		accountRepo: repo,
+		cache:       cache,
+		cfg:         &config.Config{RunMode: config.RunModeSimple},
+	}
+
+	acc, err := svc.selectAccountForModelWithPlatform(ctx, &groupID, "", "", nil, PlatformOpenAI)
+	require.Error(t, err, "SimpleMode + grouped key 在分组内无账号时应报错")
+	require.Nil(t, acc)
+}
+
+func TestOpenAIGroupIsolation_SimpleMode_GroupedKeyStillIsolates(t *testing.T) {
+	// OpenAI 专用 gateway 在 SimpleMode 下也必须保留 grouped key 的真实隔离语义。
+	ctx := context.Background()
+	groupID := int64(100)
+
+	accounts := []Account{
+		{ID: 1, Platform: PlatformOpenAI, Priority: 1, Status: StatusActive, Schedulable: true, AccountGroups: nil},
+		{ID: 2, Platform: PlatformOpenAI, Priority: 2, Status: StatusActive, Schedulable: true, AccountGroups: []AccountGroup{{GroupID: 200}}},
+		{ID: 3, Platform: PlatformOpenAI, Priority: 3, Status: StatusActive, Schedulable: true, AccountGroups: []AccountGroup{{GroupID: 100}}},
+	}
+	repo := newGroupAwareMockRepo(accounts)
+
+	svc := &OpenAIGatewayService{
+		accountRepo: repo,
+		cfg:         &config.Config{RunMode: config.RunModeSimple},
+	}
+
+	items, err := svc.listSchedulableAccounts(ctx, &groupID)
+	require.NoError(t, err, "OpenAI SimpleMode + grouped key 应按分组查询")
+	require.Len(t, items, 1)
+	require.Equal(t, int64(3), items[0].ID)
+}
+
+func TestOpenAIGroupIsolation_SimpleMode_GroupedKeyWithoutMatchReturnsEmpty(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(100)
+
+	accounts := []Account{
+		{ID: 1, Platform: PlatformOpenAI, Priority: 1, Status: StatusActive, Schedulable: true, AccountGroups: nil},
+		{ID: 2, Platform: PlatformOpenAI, Priority: 2, Status: StatusActive, Schedulable: true, AccountGroups: []AccountGroup{{GroupID: 200}}},
+	}
+	repo := newGroupAwareMockRepo(accounts)
+
+	svc := &OpenAIGatewayService{
+		accountRepo: repo,
+		cfg:         &config.Config{RunMode: config.RunModeSimple},
+	}
+
+	items, err := svc.listSchedulableAccounts(ctx, &groupID)
+	require.NoError(t, err)
+	require.Empty(t, items, "OpenAI SimpleMode + grouped key 不应再回落到全平台账号池")
+}
+
+func TestSchedulerSnapshot_SimpleMode_GroupedKeyPreservesExplicitGroup(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(100)
+
+	accounts := []Account{
+		{ID: 1, Platform: PlatformOpenAI, Priority: 1, Status: StatusActive, Schedulable: true, AccountGroups: []AccountGroup{{GroupID: 100}}},
+		{ID: 2, Platform: PlatformOpenAI, Priority: 1, Status: StatusActive, Schedulable: true, AccountGroups: []AccountGroup{{GroupID: 200}}},
+		{ID: 3, Platform: PlatformOpenAI, Priority: 1, Status: StatusActive, Schedulable: true, AccountGroups: nil},
+	}
+	repo := newGroupAwareMockRepo(accounts)
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	cfg.Gateway.Scheduling.DbFallbackEnabled = true
+
+	snapshot := NewSchedulerSnapshotService(nil, nil, repo, nil, cfg)
+	bucket := snapshot.bucketFor(&groupID, PlatformOpenAI, SchedulerModeSingle)
+
+	require.Equal(t, int64(100), bucket.GroupID, "SimpleMode 下显式 group bucket 不应被压扁成 0")
+
+	list, _, err := snapshot.ListSchedulableAccounts(ctx, &groupID, PlatformOpenAI, false)
+	require.NoError(t, err)
+	require.Len(t, list, 1)
+	require.Equal(t, int64(1), list[0].ID, "SimpleMode snapshot + grouped key 应只返回该分组账号")
+}
+
+func TestSchedulerSnapshot_SimpleMode_ExplicitGroupIDsStayDistinct(t *testing.T) {
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	snapshot := NewSchedulerSnapshotService(nil, nil, nil, nil, cfg)
+
+	require.Equal(t, []int64{100, 200}, snapshot.normalizeGroupIDs([]int64{100, 200, 100}))
+	require.Equal(t, []int64{0}, snapshot.normalizeGroupIDs(nil))
+	require.Equal(t, []int64{0}, snapshot.normalizeGroupIDs([]int64{0, -1}))
+}

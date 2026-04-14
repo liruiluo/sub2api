@@ -603,9 +603,6 @@ func (s *SchedulerSnapshotService) loadAccountsFromDB(ctx context.Context, bucke
 		return nil, ErrSchedulerCacheNotReady
 	}
 	groupID := bucket.GroupID
-	if s.isRunModeSimple() {
-		groupID = 0
-	}
 
 	if useMixed {
 		platforms := []string{bucket.Platform, PlatformAntigravity}
@@ -649,9 +646,6 @@ func (s *SchedulerSnapshotService) bucketFor(groupID *int64, platform string, mo
 }
 
 func (s *SchedulerSnapshotService) normalizeGroupID(groupID *int64) int64 {
-	if s.isRunModeSimple() {
-		return 0
-	}
 	if groupID == nil || *groupID <= 0 {
 		return 0
 	}
@@ -659,9 +653,6 @@ func (s *SchedulerSnapshotService) normalizeGroupID(groupID *int64) int64 {
 }
 
 func (s *SchedulerSnapshotService) normalizeGroupIDs(groupIDs []int64) []int64 {
-	if s.isRunModeSimple() {
-		return []int64{0}
-	}
 	if len(groupIDs) == 0 {
 		return []int64{0}
 	}
