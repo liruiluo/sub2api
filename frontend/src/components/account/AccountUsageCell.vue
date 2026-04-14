@@ -439,12 +439,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import type { Account, AccountUsageInfo, GeminiCredentials, WindowStats } from '@/types'
 import { buildOpenAIUsageRefreshKey } from '@/utils/accountUsageRefresh'
 import { formatCompactNumber } from '@/utils/format'
+import { enqueueUsageRequest } from '@/utils/usageLoadQueue'
 import UsageProgressBar from './UsageProgressBar.vue'
 import AccountQuotaInfo from './AccountQuotaInfo.vue'
 
@@ -465,13 +466,18 @@ const props = withDefaults(
 const { t } = useI18n()
 const desktopViewportQuery = '(min-width: 768px)'
 
+const unmounted = ref(false)
+onBeforeUnmount(() => { unmounted.value = true })
+
 const loading = ref(false)
 const activeQueryLoading = ref(false)
 const error = ref<string | null>(null)
 const usageInfo = ref<AccountUsageInfo | null>(null)
 const rootRef = ref<HTMLElement | null>(null)
+const supportsMatchMedia =
+  typeof window !== 'undefined' && typeof window.matchMedia === 'function'
 const isDesktopViewport = ref(
-  typeof window === 'undefined' ? true : window.matchMedia(desktopViewportQuery).matches
+  supportsMatchMedia ? window.matchMedia(desktopViewportQuery).matches : true
 )
 const hasEnteredViewport = ref(false)
 const pendingAutoLoad = ref(false)
@@ -948,12 +954,32 @@ const loadUsage = async (source?: 'passive' | 'active') => {
   error.value = null
 
   try {
-    usageInfo.value = await adminAPI.accounts.getUsage(props.account.id, source)
+    const fetchFn = () => source
+      ? adminAPI.accounts.getUsage(props.account.id, source)
+      : adminAPI.accounts.getUsage(props.account.id)
+    let result: AccountUsageInfo
+    // Only throttle Anthropic OAuth/setup-token accounts to avoid upstream 429
+    if (
+      props.account.platform === 'anthropic' &&
+      (props.account.type === 'oauth' || props.account.type === 'setup-token')
+    ) {
+      result = await enqueueUsageRequest(
+        props.account.platform,
+        'claude_code',
+        props.account.proxy_id,
+        fetchFn
+      )
+    } else {
+      result = await fetchFn()
+    }
+    if (!unmounted.value) usageInfo.value = result
   } catch (e: any) {
-    error.value = t('common.error')
-    console.error('Failed to load usage:', e)
+    if (!unmounted.value) {
+      error.value = t('common.error')
+      console.error('Failed to load usage:', e)
+    }
   } finally {
-    loading.value = false
+    if (!unmounted.value) loading.value = false
   }
 }
 
@@ -1106,7 +1132,7 @@ const formatKeyUserCost = computed(() => {
 })
 
 onMounted(() => {
-  if (typeof window !== 'undefined') {
+  if (supportsMatchMedia) {
     desktopViewportMediaQuery = window.matchMedia(desktopViewportQuery)
     isDesktopViewport.value = desktopViewportMediaQuery.matches
     desktopViewportListener = (event: MediaQueryListEvent) => {

@@ -54,6 +54,10 @@ const (
 	defaultModelsListCacheTTL    = 15 * time.Second
 	postUsageBillingTimeout      = 15 * time.Second
 	debugGatewayBodyEnv          = "SUB2API_DEBUG_GATEWAY_BODY"
+
+	claudeMaxMessageOverheadTokens = 3
+	claudeMaxBlockOverheadTokens   = 1
+	claudeMaxUnknownContentTokens  = 4
 )
 
 const (
@@ -7213,8 +7217,18 @@ func (s *GatewayService) handleNonStreamingResponse(ctx context.Context, resp *h
 		}
 	}
 
-	// Cache TTL Override: 重写 non-streaming 响应中的 cache_creation 分类
-	if account.IsCacheTTLOverrideEnabled() {
+	claudeMaxRulesActive := shouldApplyClaudeMaxBillingRulesForUsage(
+		claudeMaxResponseRewriteContextFromContext(ctx).Group,
+		originalModel,
+		claudeMaxResponseRewriteContextFromContext(ctx).Parsed,
+	)
+	if outcome := applyClaudeMaxSimulationToUsage(ctx, &response.Usage, originalModel, account.ID); outcome.Simulated {
+		body = rewriteClaudeUsageJSONBytes(body, response.Usage)
+	}
+
+	// Cache TTL Override: 重写 non-streaming 响应中的 cache_creation 分类。
+	// Claude Max 规则开启时，保留原始/模拟后的 cache_creation 分类，不再套账号级 TTL override。
+	if account.IsCacheTTLOverrideEnabled() && !claudeMaxRulesActive {
 		overrideTarget := account.GetCacheTTLOverrideTarget()
 		if applyCacheTTLOverride(&response.Usage, overrideTarget) {
 			// 同步更新 body JSON 中的嵌套 cache_creation 对象
@@ -7284,6 +7298,7 @@ type RecordUsageInput struct {
 	User               *User
 	Account            *Account
 	Subscription       *UserSubscription  // 可选：订阅信息
+	ParsedRequest      *ParsedRequest     // 可选：Claude Max 策略所需的已解析请求
 	InboundEndpoint    string             // 入站端点（客户端请求路径）
 	UpstreamEndpoint   string             // 上游端点（标准化后的上游路径）
 	UserAgent          string             // 请求的 User-Agent
@@ -7617,6 +7632,7 @@ func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInpu
 		APIKeyService:      input.APIKeyService,
 		ChannelUsageFields: input.ChannelUsageFields,
 	}, &recordUsageOpts{
+		ParsedRequest:    input.ParsedRequest,
 		EnableClaudePath: true,
 	})
 }
@@ -7700,9 +7716,15 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 		result.Usage.InputTokens = 0
 	}
 
+	claudeMaxRulesActive := shouldApplyClaudeMaxBillingRulesForUsage(apiKey.Group, result.Model, opts.ParsedRequest)
+	if claudeMaxRulesActive {
+		applyClaudeMaxCacheBillingPolicyToUsage(&result.Usage, opts.ParsedRequest, apiKey.Group, result.Model, account.ID)
+	}
+
 	// Cache TTL Override: 确保计费时 token 分类与账号设置一致
+	// Claude Max 规则开启时，保留原始/模拟后的 cache_creation 分类，不再套账号级 TTL override。
 	cacheTTLOverridden := false
-	if account.IsCacheTTLOverrideEnabled() {
+	if account.IsCacheTTLOverrideEnabled() && !claudeMaxRulesActive {
 		applyCacheTTLOverride(&result.Usage, account.GetCacheTTLOverrideTarget())
 		cacheTTLOverridden = (result.Usage.CacheCreation5mTokens + result.Usage.CacheCreation1hTokens) > 0
 	}

@@ -464,6 +464,20 @@ func (_u *GroupUpdate) SetNillableMcpXMLInject(v *bool) *GroupUpdate {
 	return _u
 }
 
+// SetSimulateClaudeMaxEnabled sets the "simulate_claude_max_enabled" field.
+func (_u *GroupUpdate) SetSimulateClaudeMaxEnabled(v bool) *GroupUpdate {
+	_u.mutation.SetSimulateClaudeMaxEnabled(v)
+	return _u
+}
+
+// SetNillableSimulateClaudeMaxEnabled sets the "simulate_claude_max_enabled" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableSimulateClaudeMaxEnabled(v *bool) *GroupUpdate {
+	if v != nil {
+		_u.SetSimulateClaudeMaxEnabled(*v)
+	}
+	return _u
+}
+
 // SetSupportedModelScopes sets the "supported_model_scopes" field.
 func (_u *GroupUpdate) SetSupportedModelScopes(v []string) *GroupUpdate {
 	_u.mutation.SetSupportedModelScopes(v)
@@ -1000,6 +1014,9 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.McpXMLInject(); ok {
 		_spec.SetField(group.FieldMcpXMLInject, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.SimulateClaudeMaxEnabled(); ok {
+		_spec.SetField(group.FieldSimulateClaudeMaxEnabled, field.TypeBool, value)
 	}
 	if value, ok := _u.mutation.SupportedModelScopes(); ok {
 		_spec.SetField(group.FieldSupportedModelScopes, field.TypeJSON, value)
@@ -1772,6 +1789,20 @@ func (_u *GroupUpdateOne) SetNillableMcpXMLInject(v *bool) *GroupUpdateOne {
 	return _u
 }
 
+// SetSimulateClaudeMaxEnabled sets the "simulate_claude_max_enabled" field.
+func (_u *GroupUpdateOne) SetSimulateClaudeMaxEnabled(v bool) *GroupUpdateOne {
+	_u.mutation.SetSimulateClaudeMaxEnabled(v)
+	return _u
+}
+
+// SetNillableSimulateClaudeMaxEnabled sets the "simulate_claude_max_enabled" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableSimulateClaudeMaxEnabled(v *bool) *GroupUpdateOne {
+	if v != nil {
+		_u.SetSimulateClaudeMaxEnabled(*v)
+	}
+	return _u
+}
+
 // SetSupportedModelScopes sets the "supported_model_scopes" field.
 func (_u *GroupUpdateOne) SetSupportedModelScopes(v []string) *GroupUpdateOne {
 	_u.mutation.SetSupportedModelScopes(v)
@@ -2338,6 +2369,9 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if value, ok := _u.mutation.McpXMLInject(); ok {
 		_spec.SetField(group.FieldMcpXMLInject, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.SimulateClaudeMaxEnabled(); ok {
+		_spec.SetField(group.FieldSimulateClaudeMaxEnabled, field.TypeBool, value)
 	}
 	if value, ok := _u.mutation.SupportedModelScopes(); ok {
 		_spec.SetField(group.FieldSupportedModelScopes, field.TypeJSON, value)

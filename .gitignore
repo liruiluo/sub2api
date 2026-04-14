@@ -78,6 +78,7 @@ Desktop.ini
 # ===================
 tmp/
 temp/
+logs/
 *.tmp
 *.temp
 *.log
@@ -130,8 +131,15 @@ docs/*
 !docs/PAYMENT.md
 !docs/PAYMENT_CN.md
 .serena/
+
+# ===================
+# 压测工具
+# ===================
+tools/loadtest/
+# Antigravity Manager
+Antigravity-Manager/
+antigravity_projectid_fix.patch
 .codex/
 frontend/coverage/
 aicodex
 output/
-

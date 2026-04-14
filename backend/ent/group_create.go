@@ -335,6 +335,20 @@ func (_c *GroupCreate) SetNillableMcpXMLInject(v *bool) *GroupCreate {
 	return _c
 }
 
+// SetSimulateClaudeMaxEnabled sets the "simulate_claude_max_enabled" field.
+func (_c *GroupCreate) SetSimulateClaudeMaxEnabled(v bool) *GroupCreate {
+	_c.mutation.SetSimulateClaudeMaxEnabled(v)
+	return _c
+}
+
+// SetNillableSimulateClaudeMaxEnabled sets the "simulate_claude_max_enabled" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableSimulateClaudeMaxEnabled(v *bool) *GroupCreate {
+	if v != nil {
+		_c.SetSimulateClaudeMaxEnabled(*v)
+	}
+	return _c
+}
+
 // SetSupportedModelScopes sets the "supported_model_scopes" field.
 func (_c *GroupCreate) SetSupportedModelScopes(v []string) *GroupCreate {
 	_c.mutation.SetSupportedModelScopes(v)
@@ -602,6 +616,10 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultMcpXMLInject
 		_c.mutation.SetMcpXMLInject(v)
 	}
+	if _, ok := _c.mutation.SimulateClaudeMaxEnabled(); !ok {
+		v := group.DefaultSimulateClaudeMaxEnabled
+		_c.mutation.SetSimulateClaudeMaxEnabled(v)
+	}
 	if _, ok := _c.mutation.SupportedModelScopes(); !ok {
 		v := group.DefaultSupportedModelScopes
 		_c.mutation.SetSupportedModelScopes(v)
@@ -690,6 +708,9 @@ func (_c *GroupCreate) check() error {
 	}
 	if _, ok := _c.mutation.McpXMLInject(); !ok {
 		return &ValidationError{Name: "mcp_xml_inject", err: errors.New(`ent: missing required field "Group.mcp_xml_inject"`)}
+	}
+	if _, ok := _c.mutation.SimulateClaudeMaxEnabled(); !ok {
+		return &ValidationError{Name: "simulate_claude_max_enabled", err: errors.New(`ent: missing required field "Group.simulate_claude_max_enabled"`)}
 	}
 	if _, ok := _c.mutation.SupportedModelScopes(); !ok {
 		return &ValidationError{Name: "supported_model_scopes", err: errors.New(`ent: missing required field "Group.supported_model_scopes"`)}
@@ -835,6 +856,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.McpXMLInject(); ok {
 		_spec.SetField(group.FieldMcpXMLInject, field.TypeBool, value)
 		_node.McpXMLInject = value
+	}
+	if value, ok := _c.mutation.SimulateClaudeMaxEnabled(); ok {
+		_spec.SetField(group.FieldSimulateClaudeMaxEnabled, field.TypeBool, value)
+		_node.SimulateClaudeMaxEnabled = value
 	}
 	if value, ok := _c.mutation.SupportedModelScopes(); ok {
 		_spec.SetField(group.FieldSupportedModelScopes, field.TypeJSON, value)
@@ -1407,6 +1432,18 @@ func (u *GroupUpsert) SetMcpXMLInject(v bool) *GroupUpsert {
 // UpdateMcpXMLInject sets the "mcp_xml_inject" field to the value that was provided on create.
 func (u *GroupUpsert) UpdateMcpXMLInject() *GroupUpsert {
 	u.SetExcluded(group.FieldMcpXMLInject)
+	return u
+}
+
+// SetSimulateClaudeMaxEnabled sets the "simulate_claude_max_enabled" field.
+func (u *GroupUpsert) SetSimulateClaudeMaxEnabled(v bool) *GroupUpsert {
+	u.Set(group.FieldSimulateClaudeMaxEnabled, v)
+	return u
+}
+
+// UpdateSimulateClaudeMaxEnabled sets the "simulate_claude_max_enabled" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateSimulateClaudeMaxEnabled() *GroupUpsert {
+	u.SetExcluded(group.FieldSimulateClaudeMaxEnabled)
 	return u
 }
 
@@ -1997,6 +2034,20 @@ func (u *GroupUpsertOne) SetMcpXMLInject(v bool) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdateMcpXMLInject() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateMcpXMLInject()
+	})
+}
+
+// SetSimulateClaudeMaxEnabled sets the "simulate_claude_max_enabled" field.
+func (u *GroupUpsertOne) SetSimulateClaudeMaxEnabled(v bool) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetSimulateClaudeMaxEnabled(v)
+	})
+}
+
+// UpdateSimulateClaudeMaxEnabled sets the "simulate_claude_max_enabled" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateSimulateClaudeMaxEnabled() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateSimulateClaudeMaxEnabled()
 	})
 }
 
@@ -2768,6 +2819,20 @@ func (u *GroupUpsertBulk) SetMcpXMLInject(v bool) *GroupUpsertBulk {
 func (u *GroupUpsertBulk) UpdateMcpXMLInject() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateMcpXMLInject()
+	})
+}
+
+// SetSimulateClaudeMaxEnabled sets the "simulate_claude_max_enabled" field.
+func (u *GroupUpsertBulk) SetSimulateClaudeMaxEnabled(v bool) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetSimulateClaudeMaxEnabled(v)
+	})
+}
+
+// UpdateSimulateClaudeMaxEnabled sets the "simulate_claude_max_enabled" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateSimulateClaudeMaxEnabled() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateSimulateClaudeMaxEnabled()
 	})
 }
 
