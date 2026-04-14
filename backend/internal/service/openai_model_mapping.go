@@ -11,8 +11,8 @@ func resolveOpenAIForwardModel(account *Account, requestedModel, defaultMappedMo
 		return requestedModel
 	}
 
-	mappedModel, matched := account.ResolveMappedModel(requestedModel)
-	if !matched && defaultMappedModel != "" {
+	mappedModel := account.GetMappedModel(requestedModel)
+	if !account.HasExplicitModelMapping(requestedModel) && defaultMappedModel != "" {
 		return defaultMappedModel
 	}
 	return mappedModel

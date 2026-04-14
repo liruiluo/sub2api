@@ -1783,6 +1783,23 @@ func (s *OpenAIGatewayService) shouldFailoverUpstreamError(statusCode int) bool 
 	}
 }
 
+func shouldFailoverOpenAIRequestError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)
+}
+
+func shouldFailoverOpenAIStreamingFailure(c *gin.Context, firstTokenMs *int, clientDisconnected bool) bool {
+	if clientDisconnected || firstTokenMs != nil {
+		return false
+	}
+	if c == nil || c.Writer == nil {
+		return true
+	}
+	return !c.Writer.Written()
+}
+
 func (s *OpenAIGatewayService) shouldFailoverOpenAIUpstreamResponse(statusCode int, upstreamMsg string, upstreamBody []byte) bool {
 	if s.shouldFailoverUpstreamError(statusCode) {
 		return true
@@ -1973,6 +1990,14 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 	}
 
+	if account.IsOpenAIChatCompletionsCompatEnabled() {
+		if normalizeDeveloperRoleForCompat(reqBody["input"]) {
+			bodyModified = true
+			disablePatch()
+			logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Normalized developer role to system for compat upstream (account: %s)", account.Name)
+		}
+	}
+
 	if account.Type == AccountTypeOAuth {
 		codexResult := applyCodexOAuthTransform(reqBody, isCodexCLI, isOpenAIResponsesCompactPath(c))
 		if codexResult.Modified {
@@ -2087,6 +2112,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 
 	// Capture upstream request body for ops retry of this attempt.
 	setOpsUpstreamRequestBody(c, body)
+
+	if account.IsOpenAIChatCompletionsCompatEnabled() {
+		return s.forwardOpenAIResponsesViaChatCompletionsCompat(ctx, c, account, body, startTime, originalModel, upstreamModel, reqStream)
+	}
 
 	// 命中 WS 时仅走 WebSocket Mode；不再自动回退 HTTP。
 	if wsDecision.Transport == OpenAIUpstreamTransportResponsesWebsocketV2 {
@@ -2331,6 +2360,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				Kind:               "request_error",
 				Message:            safeErr,
 			})
+			if shouldFailoverOpenAIRequestError(err) {
+				return nil, &UpstreamFailoverError{StatusCode: http.StatusBadGateway}
+			}
 			c.JSON(http.StatusBadGateway, gin.H{
 				"error": gin.H{
 					"type":    "upstream_error",
@@ -2345,6 +2377,11 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 			_ = resp.Body.Close()
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
+
+			if account.IsOpenAIApiKey() && isOpenAIChatCompletionsCompatError(resp.StatusCode, respBody) {
+				s.markOpenAIChatCompletionsCompat(ctx, account)
+				return s.forwardOpenAIResponsesViaChatCompletionsCompat(ctx, c, account, body, startTime, originalModel, upstreamModel, reqStream)
+			}
 
 			upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 			upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
@@ -2525,6 +2562,13 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	releaseUpstreamCtx()
 	if err != nil {
 		return nil, err
+	}
+	body, err = normalizeOfficialOpenAIBareCodexPassthroughBody(body, upstreamReq.URL.String())
+	if err != nil {
+		return nil, err
+	}
+	if body != nil {
+		resetOpenAIPassthroughRequestBody(upstreamReq, body)
 	}
 
 	proxyURL := ""
@@ -2748,6 +2792,39 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	}
 
 	return req, nil
+}
+
+func normalizeOfficialOpenAIBareCodexPassthroughBody(body []byte, targetURL string) ([]byte, error) {
+	if len(body) == 0 {
+		return body, nil
+	}
+	if !strings.HasPrefix(strings.TrimSpace(targetURL), openaiPlatformAPIURL) {
+		return body, nil
+	}
+
+	model := strings.TrimSpace(gjson.GetBytes(body, "model").String())
+	if !strings.EqualFold(model, "codex") {
+		return body, nil
+	}
+
+	normalizedBody, err := sjson.SetBytes(body, "model", "gpt-5-codex")
+	if err != nil {
+		return nil, fmt.Errorf("normalize official bare codex passthrough model: %w", err)
+	}
+	return normalizedBody, nil
+}
+
+func resetOpenAIPassthroughRequestBody(req *http.Request, body []byte) {
+	if req == nil {
+		return
+	}
+	cloned := append([]byte(nil), body...)
+	req.Body = io.NopCloser(bytes.NewReader(cloned))
+	req.ContentLength = int64(len(cloned))
+	req.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(cloned)), nil
+	}
+	req.Header.Set("Content-Length", strconv.Itoa(len(cloned)))
 }
 
 func shouldFailoverOpenAIPassthroughResponse(statusCode int) bool {

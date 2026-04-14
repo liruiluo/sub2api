@@ -515,22 +515,48 @@ func ensureAntigravityDefaultPassthroughs(mapping map[string]string, models []st
 	}
 }
 
-func normalizeRequestedModelForLookup(platform, requestedModel string) string {
-	trimmed := strings.TrimSpace(requestedModel)
-	if trimmed == "" {
-		return ""
+// IsModelSupported 检查模型是否在 model_mapping 中（支持通配符）
+// 如果未配置 mapping，返回 true（允许所有模型）
+func (a *Account) IsModelSupported(requestedModel string) bool {
+	mapping := a.GetModelMapping()
+	if len(mapping) == 0 {
+		return true // 无映射 = 允许所有
 	}
-	if platform != PlatformGemini && platform != PlatformAntigravity {
-		return trimmed
+	// 精确匹配
+	if _, exists := mapping[requestedModel]; exists {
+		return true
 	}
-	if trimmed == "gemini-3.1-pro-preview-customtools" {
-		return "gemini-3.1-pro-preview"
+	// 通配符匹配
+	for pattern := range mapping {
+		if matchWildcard(pattern, requestedModel) {
+			return true
+		}
 	}
-	return trimmed
+	return false
 }
 
-func mappingSupportsRequestedModel(mapping map[string]string, requestedModel string) bool {
-	if requestedModel == "" {
+// GetMappedModel 获取映射后的模型名（支持通配符，最长优先匹配）
+// 如果未配置 mapping，返回原始模型名
+func (a *Account) GetMappedModel(requestedModel string) string {
+	mapping := a.GetModelMapping()
+	if len(mapping) == 0 {
+		return requestedModel
+	}
+	// 精确匹配优先
+	if mappedModel, exists := mapping[requestedModel]; exists {
+		return mappedModel
+	}
+	// 通配符匹配（最长优先）
+	return matchWildcardMapping(mapping, requestedModel)
+}
+
+// HasExplicitModelMapping reports whether the requested model matched an
+// explicit model_mapping rule on this account, including identity passthrough
+// entries such as "qwen3-coder-plus" -> "qwen3-coder-plus" and wildcard
+// matches. Empty model_mapping means false.
+func (a *Account) HasExplicitModelMapping(requestedModel string) bool {
+	mapping := a.GetModelMapping()
+	if len(mapping) == 0 {
 		return false
 	}
 	if _, exists := mapping[requestedModel]; exists {
@@ -542,56 +568,6 @@ func mappingSupportsRequestedModel(mapping map[string]string, requestedModel str
 		}
 	}
 	return false
-}
-
-func resolveRequestedModelInMapping(mapping map[string]string, requestedModel string) (mappedModel string, matched bool) {
-	if requestedModel == "" {
-		return "", false
-	}
-	if mappedModel, exists := mapping[requestedModel]; exists {
-		return mappedModel, true
-	}
-	return matchWildcardMappingResult(mapping, requestedModel)
-}
-
-// IsModelSupported 检查模型是否在 model_mapping 中（支持通配符）
-// 如果未配置 mapping，返回 true（允许所有模型）
-func (a *Account) IsModelSupported(requestedModel string) bool {
-	mapping := a.GetModelMapping()
-	if len(mapping) == 0 {
-		return true // 无映射 = 允许所有
-	}
-	if mappingSupportsRequestedModel(mapping, requestedModel) {
-		return true
-	}
-	normalized := normalizeRequestedModelForLookup(a.Platform, requestedModel)
-	return normalized != requestedModel && mappingSupportsRequestedModel(mapping, normalized)
-}
-
-// GetMappedModel 获取映射后的模型名（支持通配符，最长优先匹配）
-// 如果未配置 mapping，返回原始模型名
-func (a *Account) GetMappedModel(requestedModel string) string {
-	mappedModel, _ := a.ResolveMappedModel(requestedModel)
-	return mappedModel
-}
-
-// ResolveMappedModel 获取映射后的模型名，并返回是否命中了账号级映射。
-// matched=true 表示命中了精确映射或通配符映射，即使映射结果与原模型名相同。
-func (a *Account) ResolveMappedModel(requestedModel string) (mappedModel string, matched bool) {
-	mapping := a.GetModelMapping()
-	if len(mapping) == 0 {
-		return requestedModel, false
-	}
-	if mappedModel, matched := resolveRequestedModelInMapping(mapping, requestedModel); matched {
-		return mappedModel, true
-	}
-	normalized := normalizeRequestedModelForLookup(a.Platform, requestedModel)
-	if normalized != requestedModel {
-		if mappedModel, matched := resolveRequestedModelInMapping(mapping, normalized); matched {
-			return mappedModel, true
-		}
-	}
-	return requestedModel, false
 }
 
 func (a *Account) GetBaseURL() string {
@@ -665,7 +641,9 @@ func matchWildcard(pattern, str string) bool {
 	return matchAntigravityWildcard(pattern, str)
 }
 
-func matchWildcardMappingResult(mapping map[string]string, requestedModel string) (string, bool) {
+// matchWildcardMapping 通配符映射匹配（最长优先）
+// 如果没有匹配，返回原始字符串
+func matchWildcardMapping(mapping map[string]string, requestedModel string) string {
 	// 收集所有匹配的 pattern，按长度降序排序（最长优先）
 	type patternMatch struct {
 		pattern string
@@ -680,7 +658,7 @@ func matchWildcardMappingResult(mapping map[string]string, requestedModel string
 	}
 
 	if len(matches) == 0 {
-		return requestedModel, false // 无匹配，返回原始模型名
+		return requestedModel // 无匹配，返回原始模型名
 	}
 
 	// 按 pattern 长度降序排序
@@ -691,7 +669,7 @@ func matchWildcardMappingResult(mapping map[string]string, requestedModel string
 		return matches[i].pattern < matches[j].pattern
 	})
 
-	return matches[0].target, true
+	return matches[0].target
 }
 
 func (a *Account) IsCustomErrorCodesEnabled() bool {
@@ -982,6 +960,22 @@ func (a *Account) IsOpenAIPassthroughEnabled() bool {
 		return enabled
 	}
 	if enabled, ok := a.Extra["openai_oauth_passthrough"].(bool); ok {
+		return enabled
+	}
+	return false
+}
+
+// IsOpenAIChatCompletionsCompatEnabled returns whether an OpenAI API-key
+// account should use chat/completions compatibility mode instead of assuming
+// upstream /responses support.
+func (a *Account) IsOpenAIChatCompletionsCompatEnabled() bool {
+	if a == nil || !a.IsOpenAIApiKey() || a.Extra == nil {
+		return false
+	}
+	if enabled, ok := a.Extra[openAIAPIKeyChatCompletionsCompatExtraKey].(bool); ok {
+		return enabled
+	}
+	if enabled, ok := a.Extra["openai_chat_completions_compat"].(bool); ok {
 		return enabled
 	}
 	return false

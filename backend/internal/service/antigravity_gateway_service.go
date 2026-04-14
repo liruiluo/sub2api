@@ -978,6 +978,17 @@ func mapAntigravityModel(account *Account, requestedModel string) string {
 		return mapped
 	}
 
+	normalizedRequestedModel := normalizeAntigravityMappingLookupModel(requestedModel)
+	if normalizedRequestedModel != requestedModel {
+		normalizedMapped := account.GetMappedModel(normalizedRequestedModel)
+		if normalizedMapped != normalizedRequestedModel {
+			return normalizedMapped
+		}
+		if account.IsModelSupported(normalizedRequestedModel) {
+			return normalizedRequestedModel
+		}
+	}
+
 	// 如果 mapped == requestedModel，检查是否在映射表中配置（精确或通配符）
 	// 这区分两种情况：
 	// 1. 映射表中有 "model-a": "model-a"（显式透传）→ 返回 model-a
@@ -989,6 +1000,11 @@ func mapAntigravityModel(account *Account, requestedModel string) string {
 
 	// 未在映射表中配置的模型，返回空字符串（不支持）
 	return ""
+}
+
+func normalizeAntigravityMappingLookupModel(model string) string {
+	normalized := normalizeAntigravityModelName(model)
+	return strings.TrimSuffix(normalized, "-customtools")
 }
 
 // getMappedModel 获取映射后的模型名

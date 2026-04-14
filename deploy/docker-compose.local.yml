@@ -24,7 +24,7 @@ services:
   # Sub2API Application
   # ===========================================================================
   sub2api:
-    image: weishaw/sub2api:latest
+    image: leadtek/sub2api:local
     container_name: sub2api
     restart: unless-stopped
     ulimits:
@@ -38,7 +38,7 @@ services:
       - ./data:/app/data
       # Optional: Mount custom config.yaml (uncomment and create the file first)
       # Copy config.example.yaml to config.yaml, modify it, then uncomment:
-      # - ./config.yaml:/app/data/config.yaml
+      # - ./config.yaml:/app/data/config.yaml:ro
     environment:
       # =======================================================================
       # Auto Setup (REQUIRED for Docker deployment)
@@ -146,6 +146,16 @@ services:
       # Proxy for accessing GitHub (online updates + pricing data)
       # Examples: http://host:port, socks5://host:port
       - UPDATE_PROXY_URL=${UPDATE_PROXY_URL:-}
+
+      # =======================================================================
+      # Optional upstream proxy for all outbound HTTP(S) traffic from sub2api
+      # On this workstation we may point it at a host-side bridge-only forwarder
+      # that relays into the local Clash Verge mixed port.
+      # =======================================================================
+      - HTTP_PROXY=${SUB2API_HTTP_PROXY:-}
+      - HTTPS_PROXY=${SUB2API_HTTPS_PROXY:-}
+      - ALL_PROXY=${SUB2API_ALL_PROXY:-}
+      - NO_PROXY=${SUB2API_NO_PROXY:-}
     depends_on:
       postgres:
         condition: service_healthy

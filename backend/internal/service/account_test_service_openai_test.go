@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 
@@ -144,4 +146,81 @@ func TestAccountTestService_OpenAI429PersistsSnapshotAndRateLimit(t *testing.T) 
 	if account.RateLimitResetAt != nil && repo.rateLimitedAt != nil {
 		require.WithinDuration(t, *repo.rateLimitedAt, *account.RateLimitResetAt, time.Second)
 	}
+}
+
+func TestAccountTestService_OpenAIAPIKeyUsesNonStreamResponses(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, recorder := newTestContext()
+
+	upstream := &queuedHTTPUpstream{
+		responses: []*http.Response{
+			newJSONResponse(http.StatusOK, `{"id":"resp_test","output":[{"type":"message","content":[{"type":"output_text","text":"OK"}]}]}`),
+		},
+	}
+	svc := &AccountTestService{
+		httpUpstream: upstream,
+		cfg:          &config.Config{},
+	}
+	account := &Account{
+		ID:          131,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":  "sk-test",
+			"base_url": "https://api.daiju.live/v1",
+		},
+	}
+
+	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4")
+	require.NoError(t, err)
+	require.Len(t, upstream.requests, 1)
+	require.Equal(t, "https://api.daiju.live/v1/responses", upstream.requests[0].URL.String())
+	require.Equal(t, "Bearer sk-test", upstream.requests[0].Header.Get("Authorization"))
+
+	var payload map[string]any
+	require.NoError(t, json.NewDecoder(upstream.requests[0].Body).Decode(&payload))
+	require.Equal(t, "gpt-5.4", payload["model"])
+	require.Equal(t, false, payload["stream"])
+	require.Contains(t, recorder.Body.String(), `"type":"content","text":"OK"`)
+	require.Contains(t, recorder.Body.String(), `"type":"test_complete","success":true`)
+}
+
+func TestAccountTestService_OpenAIAPIKeyCompatFallbackPersistsFlag(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, recorder := newTestContext()
+
+	upstream := &queuedHTTPUpstream{
+		responses: []*http.Response{
+			newJSONResponse(http.StatusBadRequest, `{"error":{"type":"one_hub_error","message":"field Messages is required"}}`),
+			newJSONResponse(http.StatusOK, `{"id":"chatcmpl_test","object":"chat.completion","created":1,"model":"gpt-5.4","choices":[{"index":0,"message":{"role":"assistant","content":"OK"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`),
+		},
+	}
+	repo := &openAIAccountTestRepo{}
+	svc := &AccountTestService{
+		httpUpstream: upstream,
+		accountRepo:  repo,
+		cfg:          &config.Config{},
+	}
+	account := &Account{
+		ID:          131,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":  "sk-test",
+			"base_url": "https://api.daiju.live/v1",
+		},
+	}
+
+	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4")
+	require.NoError(t, err)
+	require.Len(t, upstream.requests, 2)
+	require.Equal(t, "https://api.daiju.live/v1/responses", upstream.requests[0].URL.String())
+	require.Equal(t, "https://api.daiju.live/v1/chat/completions", upstream.requests[1].URL.String())
+	require.NotNil(t, repo.updatedExtra)
+	require.Equal(t, true, repo.updatedExtra[openAIAPIKeyChatCompletionsCompatExtraKey])
+	require.True(t, account.IsOpenAIChatCompletionsCompatEnabled())
+	require.Contains(t, recorder.Body.String(), `"type":"content","text":"OK"`)
+	require.Contains(t, recorder.Body.String(), `"type":"test_complete","success":true`)
 }

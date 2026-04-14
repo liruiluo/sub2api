@@ -125,6 +125,24 @@ func TestNormalizeOpenAIModelForUpstream(t *testing.T) {
 			model:   "gpt-4.1",
 			want:    "gpt-4.1",
 		},
+		{
+			name:    "apikey preserves explicit gpt alias instead of forcing codex normalization",
+			account: &Account{Type: AccountTypeAPIKey},
+			model:   "gpt-5",
+			want:    "gpt-5",
+		},
+		{
+			name:    "apikey preserves bare codex alias for compatible upstreams",
+			account: &Account{Type: AccountTypeAPIKey},
+			model:   "codex",
+			want:    "codex",
+		},
+		{
+			name:    "oauth still normalizes bare codex alias",
+			account: &Account{Type: AccountTypeOAuth},
+			model:   "codex",
+			want:    "gpt-5.1-codex",
+		},
 	}
 
 	for _, tt := range tests {

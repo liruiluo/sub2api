@@ -146,6 +146,16 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	}
 	logger.L().Debug("openai chat_completions: model mapping applied", logFields...)
 
+compatChatReq := chatReq
+	compatChatReq.Model = upstreamModel
+	compatChatBody, err := json.Marshal(&compatChatReq)
+	if err != nil {
+		return nil, fmt.Errorf("marshal chat compat request: %w", err)
+	}
+	if account.IsOpenAIChatCompletionsCompatEnabled() {
+		return s.forwardOpenAIChatCompletionsCompat(ctx, c, account, compatChatBody, startTime, originalModel, upstreamModel, clientStream)
+	}
+
 	if account.Type == AccountTypeOAuth {
 		var reqBody map[string]any
 		if err := json.Unmarshal(responsesBody, &reqBody); err != nil {
@@ -199,6 +209,9 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 			Kind:               "request_error",
 			Message:            safeErr,
 		})
+		if shouldFailoverOpenAIRequestError(err) {
+			return nil, &UpstreamFailoverError{StatusCode: http.StatusBadGateway}
+		}
 		writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", "Upstream request failed")
 		return nil, fmt.Errorf("upstream request failed: %s", safeErr)
 	}
@@ -209,6 +222,11 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 		_ = resp.Body.Close()
 		resp.Body = io.NopCloser(bytes.NewReader(respBody))
+
+		if account.IsOpenAIApiKey() && isOpenAIChatCompletionsCompatError(resp.StatusCode, respBody) {
+			s.markOpenAIChatCompletionsCompat(ctx, account)
+			return s.forwardOpenAIChatCompletionsCompat(ctx, c, account, compatChatBody, startTime, originalModel, upstreamModel, clientStream)
+		}
 
 		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)

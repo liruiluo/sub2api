@@ -313,6 +313,28 @@ func SupportsVerbosity(model string) bool {
 	return minor >= 3
 }
 
+func normalizeDeveloperRoleForCompat(input any) bool {
+	items, ok := input.([]any)
+	if !ok {
+		return false
+	}
+
+	modified := false
+	for _, item := range items {
+		msg, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		role, ok := msg["role"].(string)
+		if !ok || strings.TrimSpace(role) != "developer" {
+			continue
+		}
+		msg["role"] = "system"
+		modified = true
+	}
+	return modified
+}
+
 func getNormalizedCodexModel(modelID string) string {
 	if modelID == "" {
 		return ""

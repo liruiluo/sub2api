@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -51,4 +53,85 @@ func TestOpenAIOAuthService_RefreshAccountToken_NoRefreshTokenUsesExistingAccess
 	require.Equal(t, "existing-access-token", info.AccessToken)
 	require.Equal(t, "client-id-1", info.ClientID)
 	require.Zero(t, atomic.LoadInt32(&client.refreshCalls), "existing access token should be reused without calling refresh")
+}
+
+func TestOpenAIOAuthService_RefreshAccountToken_NoRefreshTokenFallsBackToSessionToken(t *testing.T) {
+	client := &openaiOAuthClientRefreshStub{}
+	svc := NewOpenAIOAuthService(nil, client)
+
+	var seenCookie atomic.Value
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenCookie.Store(r.Header.Get("Cookie"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"accessToken":"session-access","expires":"2030-01-02T03:04:05Z","user":{"id":"user-1","email":"test@example.com"},"account":{"id":"acct-1","planType":"pro"}}`))
+	}))
+	defer server.Close()
+
+	oldURL := openAIChatGPTSessionAuthURL
+	openAIChatGPTSessionAuthURL = server.URL
+	defer func() { openAIChatGPTSessionAuthURL = oldURL }()
+
+	account := &Account{
+		ID:       88,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"session_token": "session-token-abc",
+			"cookies":       "foo=bar",
+		},
+	}
+
+	info, err := svc.RefreshAccountToken(context.Background(), account)
+	require.NoError(t, err)
+	require.NotNil(t, info)
+	require.Equal(t, "session-access", info.AccessToken)
+	require.Equal(t, "acct-1", info.ChatGPTAccountID)
+	require.Equal(t, "user-1", info.ChatGPTUserID)
+	require.Equal(t, "pro", info.PlanType)
+	require.Equal(t, "test@example.com", info.Email)
+	require.Zero(t, atomic.LoadInt32(&client.refreshCalls))
+	cookie, ok := seenCookie.Load().(string)
+	require.True(t, ok)
+	require.Contains(t, cookie, "__Secure-next-auth.session-token=session-token-abc")
+	require.Contains(t, cookie, "foo=bar")
+}
+
+func TestOpenAIOAuthService_RefreshAccountToken_RefreshFailureFallsBackToSessionToken(t *testing.T) {
+	client := &openaiOAuthClientRefreshStub{}
+	svc := NewOpenAIOAuthService(nil, client)
+
+	var seenCookie atomic.Value
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenCookie.Store(r.Header.Get("Cookie"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"accessToken":"fallback-access","expires":"2031-02-03T04:05:06Z","user":{"id":"user-2","email":"fallback@example.com"},"account":{"id":"acct-2","planType":"plus"}}`))
+	}))
+	defer server.Close()
+
+	oldURL := openAIChatGPTSessionAuthURL
+	openAIChatGPTSessionAuthURL = server.URL
+	defer func() { openAIChatGPTSessionAuthURL = oldURL }()
+
+	account := &Account{
+		ID:       89,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"refresh_token": "refresh-token-1",
+			"session_token": "__Secure-next-auth.session-token=session-token-fallback;",
+		},
+	}
+
+	info, err := svc.RefreshAccountToken(context.Background(), account)
+	require.NoError(t, err)
+	require.NotNil(t, info)
+	require.Equal(t, "fallback-access", info.AccessToken)
+	require.Equal(t, "acct-2", info.ChatGPTAccountID)
+	require.Equal(t, "user-2", info.ChatGPTUserID)
+	require.Equal(t, "plus", info.PlanType)
+	require.Equal(t, "fallback@example.com", info.Email)
+	require.Equal(t, int32(1), atomic.LoadInt32(&client.refreshCalls))
+	cookie, ok := seenCookie.Load().(string)
+	require.True(t, ok)
+	require.Contains(t, cookie, "__Secure-next-auth.session-token=session-token-fallback")
 }
