@@ -1,15 +1,21 @@
 /**
- * Usage request queue that throttles API calls by group.
+ * Usage request scheduler — throttles Anthropic API calls by proxy exit.
  *
- * Accounts sharing the same upstream (platform + type + proxy) are placed
- * into a single serial queue with a configurable delay between requests,
- * preventing upstream 429 rate-limit errors.
+ * Anthropic OAuth/setup-token accounts sharing the same proxy exit are placed
+ * into a serial queue with a random 1–2s delay between requests, preventing
+ * upstream 429 rate-limit errors.
  *
- * Different groups run in parallel since they hit different upstreams.
+ * Proxy identity = host:port:username — two proxy records pointing to the
+ * same exit share a single queue. Accounts without a proxy go into a
+ * "direct" queue.
+ *
+ * All other platforms bypass the queue and execute immediately.
  */
 
+import type { Account } from '@/types'
+
 const GROUP_DELAY_MIN_MS = 1000
-const GROUP_DELAY_MAX_MS = 1500
+const GROUP_DELAY_MAX_MS = 2000
 
 type Task<T> = {
   fn: () => Promise<T>
@@ -20,8 +26,21 @@ type Task<T> = {
 const queues = new Map<string, Task<unknown>[]>()
 const running = new Set<string>()
 
-function buildGroupKey(platform: string, type: string, proxyId: number | null): string {
-  return `${platform}:${type}:${proxyId ?? 'direct'}`
+/** Whether this account needs throttled queuing. */
+function needsThrottle(account: Account): boolean {
+  return (
+    account.platform === 'anthropic' &&
+    (account.type === 'oauth' || account.type === 'setup-token')
+  )
+}
+
+/** Build a queue key from proxy connection details. */
+function buildGroupKey(account: Account): string {
+  const proxy = account.proxy
+  const proxyIdentity = proxy
+    ? `${proxy.host}:${proxy.port}:${proxy.username || ''}`
+    : 'direct'
+  return `anthropic:${proxyIdentity}`
 }
 
 async function drain(groupKey: string) {
@@ -37,7 +56,6 @@ async function drain(groupKey: string) {
     } catch (err) {
       task.reject(err)
     }
-    // Wait a random 1–1.5s before next request in the same group
     if (queue.length > 0) {
       const jitter = GROUP_DELAY_MIN_MS + Math.random() * (GROUP_DELAY_MAX_MS - GROUP_DELAY_MIN_MS)
       await new Promise((r) => setTimeout(r, jitter))
@@ -49,16 +67,18 @@ async function drain(groupKey: string) {
 }
 
 /**
- * Enqueue a usage fetch call. Returns a promise that resolves when the
- * request completes (after waiting its turn in the group queue).
+ * Schedule a usage fetch. Anthropic accounts are queued by proxy exit;
+ * all other platforms execute immediately.
  */
 export function enqueueUsageRequest<T>(
-  platform: string,
-  type: string,
-  proxyId: number | null,
+  account: Account,
   fn: () => Promise<T>
 ): Promise<T> {
-  const key = buildGroupKey(platform, type, proxyId)
+  if (!needsThrottle(account)) {
+    return fn()
+  }
+
+  const key = buildGroupKey(account)
 
   return new Promise<T>((resolve, reject) => {
     let queue = queues.get(key)

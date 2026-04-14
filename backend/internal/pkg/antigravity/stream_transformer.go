@@ -66,6 +66,9 @@ func usageToMap(u ClaudeUsage) map[string]any {
 	if u.CacheReadInputTokens > 0 {
 		m["cache_read_input_tokens"] = u.CacheReadInputTokens
 	}
+	if u.ImageOutputTokens > 0 {
+		m["image_output_tokens"] = u.ImageOutputTokens
+	}
 	return m
 }
 
