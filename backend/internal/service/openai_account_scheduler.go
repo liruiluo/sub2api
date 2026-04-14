@@ -376,6 +376,10 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
 		return nil, nil
 	}
+	if !s.service.isOpenAIAccountInGroup(account, req.GroupID) {
+		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
+		return nil, nil
+	}
 
 	result, acquireErr := s.service.tryAcquireAccountSlot(ctx, accountID, account.Concurrency)
 	if acquireErr == nil && result.Acquired {
@@ -745,7 +749,7 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 
 	for i := 0; i < len(selectionOrder); i++ {
 		candidate := selectionOrder[i]
-		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, candidate.account, req.RequestedModel)
+		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, candidate.account, req.GroupID, req.RequestedModel)
 		if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
 			continue
 		}
@@ -772,7 +776,7 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 	cfg := s.service.schedulingConfig()
 	// WaitPlan.MaxConcurrency 使用 Concurrency（非 EffectiveLoadFactor），因为 WaitPlan 控制的是 Redis 实际并发槽位等待。
 	for _, candidate := range selectionOrder {
-		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, candidate.account, req.RequestedModel)
+		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, candidate.account, req.GroupID, req.RequestedModel)
 		if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
 			continue
 		}

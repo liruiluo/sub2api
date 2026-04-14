@@ -1275,6 +1275,10 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 	if err != nil {
 		return nil
 	}
+	if !s.isOpenAIAccountInGroup(account, groupID) {
+		_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
+		return nil
+	}
 
 	// 检查账号是否需要清理粘性会话
 	// Check if sticky session should be cleared
@@ -1326,7 +1330,7 @@ func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *i
 			continue
 		}
 
-		fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, acc, requestedModel)
+		fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, acc, groupID, requestedModel)
 		if fresh == nil {
 			continue
 		}
@@ -1454,6 +1458,9 @@ func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Contex
 			account, err := s.getSchedulableAccount(ctx, accountID)
 			if err == nil {
 				clearSticky := shouldClearStickySession(account, requestedModel)
+				if !clearSticky && !s.isOpenAIAccountInGroup(account, groupID) {
+					clearSticky = true
+				}
 				if clearSticky {
 					_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
 				}
@@ -1525,7 +1532,7 @@ func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Contex
 		ordered := append([]*Account(nil), candidates...)
 		sortAccountsByPriorityAndLastUsed(ordered, false)
 		for _, acc := range ordered {
-			fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, acc, requestedModel)
+			fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, acc, groupID, requestedModel)
 			if fresh == nil {
 				continue
 			}
@@ -1578,7 +1585,7 @@ func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Contex
 			shuffleWithinSortGroups(available)
 
 			for _, item := range available {
-				fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, item.account, requestedModel)
+				fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, item.account, groupID, requestedModel)
 				if fresh == nil {
 					continue
 				}
@@ -1599,7 +1606,7 @@ func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Contex
 	// ============ Layer 3: Fallback wait ============
 	sortAccountsByPriorityAndLastUsed(candidates, false)
 	for _, acc := range candidates {
-		fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, acc, requestedModel)
+		fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, acc, groupID, requestedModel)
 		if fresh == nil {
 			continue
 		}
@@ -1618,10 +1625,17 @@ func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Contex
 }
 
 func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, groupID *int64) ([]Account, error) {
+	if groupID != nil && *groupID > 0 {
+		return s.queryOpenAISchedulableAccountsDirect(ctx, groupID)
+	}
 	if s.schedulerSnapshot != nil {
 		accounts, _, err := s.schedulerSnapshot.ListSchedulableAccounts(ctx, groupID, PlatformOpenAI, false)
 		return accounts, err
 	}
+	return s.queryOpenAISchedulableAccountsDirect(ctx, groupID)
+}
+
+func (s *OpenAIGatewayService) queryOpenAISchedulableAccountsDirect(ctx context.Context, groupID *int64) ([]Account, error) {
 	var accounts []Account
 	var err error
 	if groupID != nil {
@@ -1644,7 +1658,7 @@ func (s *OpenAIGatewayService) tryAcquireAccountSlot(ctx context.Context, accoun
 	return s.concurrencyService.AcquireAccountSlot(ctx, accountID, maxConcurrency)
 }
 
-func (s *OpenAIGatewayService) resolveFreshSchedulableOpenAIAccount(ctx context.Context, account *Account, requestedModel string) *Account {
+func (s *OpenAIGatewayService) resolveFreshSchedulableOpenAIAccount(ctx context.Context, account *Account, groupID *int64, requestedModel string) *Account {
 	if account == nil {
 		return nil
 	}
@@ -1661,10 +1675,28 @@ func (s *OpenAIGatewayService) resolveFreshSchedulableOpenAIAccount(ctx context.
 	if !fresh.IsSchedulable() || !fresh.IsOpenAI() {
 		return nil
 	}
+	if !s.isOpenAIAccountInGroup(fresh, groupID) {
+		return nil
+	}
 	if requestedModel != "" && !fresh.IsModelSupported(requestedModel) {
 		return nil
 	}
 	return fresh
+}
+
+func (s *OpenAIGatewayService) isOpenAIAccountInGroup(account *Account, groupID *int64) bool {
+	if account == nil {
+		return false
+	}
+	if groupID == nil || *groupID <= 0 {
+		return true
+	}
+	for _, gid := range account.GroupIDs {
+		if gid == *groupID {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDB(ctx context.Context, account *Account, requestedModel string) *Account {

@@ -748,7 +748,7 @@ func (s *SchedulerSnapshotService) defaultBuckets(ctx context.Context) ([]Schedu
 		}
 	}
 
-	if s.isRunModeSimple() || s.groupRepo == nil {
+	if s.groupRepo == nil {
 		return dedupeBuckets(buckets), nil
 	}
 
