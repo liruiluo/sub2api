@@ -57,6 +57,8 @@ const (
 	codexCLIVersion                    = "0.104.0"
 	// Codex 限额快照仅用于后台展示/诊断，不需要每个成功请求都立即落库。
 	openAICodexSnapshotPersistMinInterval = 30 * time.Second
+	codexRateLimitActiveExtraKey          = "codex_rate_limit_active"
+	codexRateLimitResetAtExtraKey         = "codex_rate_limit_reset_at"
 )
 
 // OpenAI allowed headers whitelist (for non-passthrough).
@@ -4802,6 +4804,14 @@ func buildCodexUsageExtraUpdates(snapshot *OpenAICodexUsageSnapshot, fallbackNow
 	}
 	updates["codex_usage_updated_at"] = baseTime.Format(time.RFC3339)
 
+	resetAt := codexRateLimitResetAtFromSnapshot(snapshot, baseTime)
+	updates[codexRateLimitActiveExtraKey] = resetAt != nil
+	if resetAt != nil {
+		updates[codexRateLimitResetAtExtraKey] = resetAt.UTC().Format(time.RFC3339)
+	} else {
+		updates[codexRateLimitResetAtExtraKey] = nil
+	}
+
 	// 归一化到 5h/7d 规范字段
 	if normalized := snapshot.Normalize(); normalized != nil {
 		if normalized.Used5hPercent != nil {
@@ -4872,6 +4882,52 @@ func codexRateLimitResetAtFromExtra(extra map[string]any, now time.Time) *time.T
 	return nil
 }
 
+func codexRateLimitActiveFromExtra(extra map[string]any) bool {
+	if len(extra) == 0 {
+		return false
+	}
+	value, ok := extra[codexRateLimitActiveExtraKey]
+	if !ok {
+		return false
+	}
+	switch v := value.(type) {
+	case bool:
+		return v
+	case string:
+		parsed, err := strconv.ParseBool(strings.TrimSpace(v))
+		return err == nil && parsed
+	case int:
+		return v != 0
+	case int64:
+		return v != 0
+	case float64:
+		return v != 0
+	case json.Number:
+		if i, err := v.Int64(); err == nil {
+			return i != 0
+		}
+	}
+	return false
+}
+
+func shouldClearOpenAICodexRateLimit(account *Account, updates map[string]any, resetAt *time.Time) bool {
+	if account == nil || !account.IsOpenAI() || len(updates) == 0 || resetAt != nil {
+		return false
+	}
+	if account.RateLimitResetAt == nil {
+		return false
+	}
+	if !codexRateLimitActiveFromExtra(account.Extra) {
+		return false
+	}
+	value, ok := updates[codexRateLimitActiveExtraKey]
+	if !ok {
+		return false
+	}
+	active, ok := value.(bool)
+	return ok && !active
+}
+
 func applyOpenAICodexRateLimitFromExtra(account *Account, now time.Time) (*time.Time, bool) {
 	if account == nil || !account.IsOpenAI() {
 		return nil, false
@@ -4919,11 +4975,23 @@ func (s *OpenAIGatewayService) updateCodexUsageSnapshot(ctx context.Context, acc
 	go func() {
 		updateCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
+
+		var accountBefore *Account
+		if shouldPersistUpdates && resetAt == nil {
+			if existing, err := s.accountRepo.GetByID(updateCtx, accountID); err == nil {
+				accountBefore = existing
+			}
+		}
+
 		if shouldPersistUpdates {
 			_ = s.accountRepo.UpdateExtra(updateCtx, accountID, updates)
 		}
 		if resetAt != nil {
 			_ = s.accountRepo.SetRateLimited(updateCtx, accountID, *resetAt)
+			return
+		}
+		if shouldClearOpenAICodexRateLimit(accountBefore, updates, resetAt) {
+			_ = s.accountRepo.ClearRateLimit(updateCtx, accountID)
 		}
 	}()
 }
