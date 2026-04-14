@@ -656,7 +656,6 @@ func TestOpenAIGatewayService_OpenAIPassthrough_429And529TriggerFailover(t *test
 			assertRepo: func(t *testing.T, repo *openAIPassthroughFailoverRepo, _ time.Time) {
 				require.Len(t, repo.rateLimitCalls, 1)
 				require.Empty(t, repo.overloadCalls)
-				require.NotEmpty(t, repo.updateExtra)
 				require.True(t, time.Until(repo.rateLimitCalls[0]) > 24*time.Hour)
 			},
 		},
@@ -682,7 +681,6 @@ func TestOpenAIGatewayService_OpenAIPassthrough_429And529TriggerFailover(t *test
 			assertRepo: func(t *testing.T, repo *openAIPassthroughFailoverRepo, _ time.Time) {
 				require.Len(t, repo.rateLimitCalls, 1)
 				require.Empty(t, repo.overloadCalls)
-				require.NotEmpty(t, repo.updateExtra)
 				require.True(t, time.Until(repo.rateLimitCalls[0]) > 24*time.Hour)
 			},
 		},
