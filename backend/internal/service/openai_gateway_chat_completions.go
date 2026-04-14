@@ -146,7 +146,7 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	}
 	logger.L().Debug("openai chat_completions: model mapping applied", logFields...)
 
-compatChatReq := chatReq
+	compatChatReq := chatReq
 	compatChatReq.Model = upstreamModel
 	compatChatBody, err := json.Marshal(&compatChatReq)
 	if err != nil {
