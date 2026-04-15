@@ -188,7 +188,7 @@ func TestAccountUsageService_PersistOpenAICodexProbeSnapshotClearsStaleRateLimit
 		"codex_5h_used_percent":      0.0,
 		"codex_7d_used_percent":      0.0,
 		codexRateLimitActiveExtraKey: false,
-	}, nil)
+	})
 
 	select {
 	case <-repo.updateExtraCh:
