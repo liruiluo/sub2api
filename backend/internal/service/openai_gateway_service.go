@@ -5166,6 +5166,7 @@ func shouldClearOpenAICodexRateLimit(account *Account, updates map[string]any, r
 	active, ok := value.(bool)
 	return ok && !active
 }
+
 // updateCodexUsageSnapshot saves the Codex usage snapshot to account's Extra field
 func (s *OpenAIGatewayService) updateCodexUsageSnapshot(ctx context.Context, accountID int64, snapshot *OpenAICodexUsageSnapshot) {
 	if snapshot == nil {
