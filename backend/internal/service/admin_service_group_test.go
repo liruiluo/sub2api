@@ -931,6 +931,7 @@ func TestAdminService_CreateGroup_SimulateClaudeMaxRequiresAnthropic(t *testing.
 	_, err := svc.CreateGroup(context.Background(), &CreateGroupInput{
 		Name:                     "openai-group",
 		Platform:                 PlatformOpenAI,
+		RateMultiplier:           1.0,
 		SimulateClaudeMaxEnabled: &enabled,
 	})
 	require.Error(t, err)
