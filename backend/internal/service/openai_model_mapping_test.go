@@ -141,7 +141,7 @@ func TestNormalizeOpenAIModelForUpstream(t *testing.T) {
 			name:    "oauth still normalizes bare codex alias",
 			account: &Account{Type: AccountTypeOAuth},
 			model:   "codex",
-			want:    "gpt-5.1-codex",
+			want:    "gpt-5.3-codex",
 		},
 	}
 
