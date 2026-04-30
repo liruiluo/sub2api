@@ -319,6 +319,46 @@ func TestOpenAIGatewayService_OAuthPassthrough_CompactUsesJSONAndKeepsNonStreami
 	require.Contains(t, rec.Body.String(), `"id":"cmp_123"`)
 }
 
+func TestResolveOpenAICodexVersionUsesGatewayFloorAndNewerClientUserAgent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name      string
+		userAgent string
+		want      string
+	}{
+		{
+			name:      "old codex tui user agent uses gateway floor",
+			userAgent: "codex-tui/0.121.0 (Ubuntu 24.4.0; x86_64) VTE_7600_ (codex-tui; 0.121.0)",
+			want:      codexCLIVersion,
+		},
+		{
+			name:      "current codex tui user agent",
+			userAgent: "codex-tui/0.125.0 (Ubuntu 24.4.0; x86_64) VTE_7600_ (codex-tui; 0.125.0)",
+			want:      codexCLIVersion,
+		},
+		{
+			name:      "codex cli rs user agent",
+			userAgent: "codex_cli_rs/0.126.1 (Linux; x86_64)",
+			want:      "0.126.1",
+		},
+		{
+			name:      "fallback for unknown client",
+			userAgent: "curl/8.0",
+			want:      codexCLIVersion,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil)
+			c.Request.Header.Set("User-Agent", tt.userAgent)
+			require.Equal(t, tt.want, resolveOpenAICodexVersion(c))
+		})
+	}
+}
+
 func TestOpenAIGatewayService_OAuthPassthrough_CodexMissingInstructionsRejectedBeforeUpstream(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	logSink, restore := captureStructuredLog(t)
@@ -792,7 +832,7 @@ func TestOpenAIGatewayService_OAuthPassthrough_NonCodexUAFallbackToCodexUA(t *te
 	require.NoError(t, err)
 	require.Equal(t, false, gjson.GetBytes(upstream.lastBody, "store").Bool())
 	require.Equal(t, true, gjson.GetBytes(upstream.lastBody, "stream").Bool())
-	require.Equal(t, "codex_cli_rs/0.104.0", upstream.lastReq.Header.Get("User-Agent"))
+	require.Equal(t, codexCLIUserAgent, upstream.lastReq.Header.Get("User-Agent"))
 }
 
 func TestOpenAIGatewayService_CodexCLIOnly_RejectsNonCodexClient(t *testing.T) {

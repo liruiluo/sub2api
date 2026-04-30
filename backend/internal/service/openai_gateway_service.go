@@ -41,7 +41,7 @@ const (
 	// OpenAI Platform API for API Key accounts (fallback)
 	openaiPlatformAPIURL   = "https://api.openai.com/v1/responses"
 	openaiStickySessionTTL = time.Hour // 粘性会话TTL
-	codexCLIUserAgent      = "codex_cli_rs/0.104.0"
+	codexCLIUserAgent      = "codex_cli_rs/0.125.0"
 	// codex_cli_only 拒绝时单个请求头日志长度上限（字符）
 	codexCLIOnlyHeaderValueMaxBytes = 256
 
@@ -55,7 +55,7 @@ const (
 	openAIWSRetryBackoffMaxDefault     = 2 * time.Second
 	openAIWSRetryJitterRatioDefault    = 0.2
 	openAICompactSessionSeedKey        = "openai_compact_session_seed"
-	codexCLIVersion                    = "0.104.0"
+	codexCLIVersion                    = "0.125.0"
 	// Codex 限额快照仅用于后台展示/诊断，不需要每个成功请求都立即落库。
 	openAICodexSnapshotPersistMinInterval = 30 * time.Second
 	codexRateLimitActiveExtraKey          = "codex_rate_limit_active"
@@ -1182,6 +1182,43 @@ func resolveOpenAIUpstreamOriginator(c *gin.Context, isOfficialClient bool) stri
 		return "codex_cli_rs"
 	}
 	return "opencode"
+}
+
+func resolveOpenAICodexVersion(c *gin.Context) string {
+	if c != nil {
+		if version := extractOpenAICodexVersionFromUserAgent(c.GetHeader("User-Agent")); version != "" && CompareVersions(version, codexCLIVersion) > 0 {
+			return version
+		}
+	}
+	return codexCLIVersion
+}
+
+func extractOpenAICodexVersionFromUserAgent(userAgent string) string {
+	userAgent = strings.TrimSpace(userAgent)
+	if userAgent == "" {
+		return ""
+	}
+	for _, marker := range []string{"codex-tui/", "codex_cli_rs/"} {
+		idx := strings.Index(userAgent, marker)
+		if idx < 0 {
+			continue
+		}
+		start := idx + len(marker)
+		end := start
+		for end < len(userAgent) {
+			ch := userAgent[end]
+			if (ch >= '0' && ch <= '9') || ch == '.' {
+				end++
+				continue
+			}
+			break
+		}
+		version := strings.Trim(userAgent[start:end], ".")
+		if version != "" && strings.Contains(version, ".") {
+			return version
+		}
+	}
+	return ""
 }
 
 // BindStickySession sets session -> account binding with standard TTL.
@@ -2942,7 +2979,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 		if isOpenAIResponsesCompactPath(c) {
 			req.Header.Set("accept", "application/json")
 			if req.Header.Get("version") == "" {
-				req.Header.Set("version", codexCLIVersion)
+				req.Header.Set("version", resolveOpenAICodexVersion(c))
 			}
 			if clientSessionID == "" {
 				clientSessionID = resolveOpenAICompactSessionID(c)
@@ -3518,7 +3555,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 		if isOpenAIResponsesCompactPath(c) {
 			req.Header.Set("accept", "application/json")
 			if req.Header.Get("version") == "" {
-				req.Header.Set("version", codexCLIVersion)
+				req.Header.Set("version", resolveOpenAICodexVersion(c))
 			}
 			compactSession := resolveOpenAICompactSessionID(c)
 			req.Header.Set("session_id", isolateOpenAISessionID(apiKeyID, compactSession))
