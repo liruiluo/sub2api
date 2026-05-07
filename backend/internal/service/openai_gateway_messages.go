@@ -251,13 +251,18 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
 
-	// Override session_id with a deterministic UUID derived from the sticky
-	// session key (buildUpstreamRequest may have set it to the raw value).
+	// Override session_id with a deterministic UUID derived from the prompt cache key.
+	// Explicit API-key prompt_cache_key values are already tenant-owned sticky keys,
+	// while auto-derived/OAuth keys still need API-key isolation to avoid collisions.
 	if promptCacheKey != "" {
-		isolatedSessionID := generateSessionUUID(isolateOpenAISessionID(apiKeyID, promptCacheKey))
-		upstreamReq.Header.Set("session_id", isolatedSessionID)
+		sessionSeed := isolateOpenAISessionID(apiKeyID, promptCacheKey)
+		if account.Type == AccountTypeAPIKey && !compatPromptCacheInjected {
+			sessionSeed = promptCacheKey
+		}
+		stickySessionID := generateSessionUUID(sessionSeed)
+		upstreamReq.Header.Set("session_id", stickySessionID)
 		if upstreamReq.Header.Get("conversation_id") != "" {
-			upstreamReq.Header.Set("conversation_id", isolatedSessionID)
+			upstreamReq.Header.Set("conversation_id", stickySessionID)
 		}
 	}
 	if account.Type == AccountTypeOAuth {

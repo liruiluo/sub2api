@@ -71,7 +71,7 @@ func TestHandle429_FallbackUsesDBSeconds(t *testing.T) {
 	svc := NewRateLimitService(accountRepo, nil, &config.Config{}, nil, nil)
 	svc.SetSettingService(settingSvc)
 
-	account := &Account{ID: 42, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	account := &Account{ID: 42, Platform: PlatformGemini, Type: AccountTypeAPIKey}
 	before := time.Now()
 	svc.handle429(context.Background(), account, http.Header{}, []byte(`{"error":{"type":"rate_limit_error","message":"slow down"}}`))
 	after := time.Now()

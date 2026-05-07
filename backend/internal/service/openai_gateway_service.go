@@ -1893,10 +1893,6 @@ func (s *OpenAIGatewayService) tryAcquireAccountSlot(ctx context.Context, accoun
 	return s.concurrencyService.AcquireAccountSlot(ctx, accountID, maxConcurrency)
 }
 
-func (s *OpenAIGatewayService) resolveFreshSchedulableOpenAIAccount(ctx context.Context, account *Account, requestedModel string, requireCompact bool) *Account {
-	return s.resolveFreshSchedulableOpenAIAccountForGroup(ctx, account, nil, requestedModel, requireCompact)
-}
-
 func (s *OpenAIGatewayService) resolveFreshSchedulableOpenAIAccountForGroup(ctx context.Context, account *Account, groupID *int64, requestedModel string, requireCompact bool) *Account {
 	if account == nil {
 		return nil
@@ -3078,6 +3074,15 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	}
 
 	if account != nil && account.Type == AccountTypeOAuth {
+		if !strings.Contains(strings.ToLower(strings.TrimSpace(reqModel)), "codex") {
+			normalizedBody, normalized, err := normalizeOpenAIPassthroughNonCodexOAuthBody(body)
+			if err != nil {
+				return nil, err
+			}
+			if normalized {
+				body = normalizedBody
+			}
+		}
 		if rejectReason := detectOpenAIPassthroughInstructionsRejectReason(reqModel, body); rejectReason != "" {
 			rejectMsg := "OpenAI codex passthrough requires a non-empty instructions field"
 			setOpsUpstreamError(c, http.StatusForbidden, rejectMsg, "")
@@ -3754,9 +3759,14 @@ func (s *OpenAIGatewayService) newOpenAIStreamFailoverError(
 			"message": message,
 		},
 	})
+	var responseHeaders http.Header
+	if c != nil && c.Writer != nil {
+		responseHeaders = c.Writer.Header().Clone()
+	}
 	return &UpstreamFailoverError{
-		StatusCode:   http.StatusBadGateway,
-		ResponseBody: body,
+		StatusCode:      http.StatusBadGateway,
+		ResponseBody:    body,
+		ResponseHeaders: responseHeaders,
 	}
 }
 
@@ -3850,8 +3860,6 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			if trimmedData == "[DONE]" {
 				sawDone = true
 			}
-			if trimmedData != "" {
-			}
 			if openAIStreamEventIsTerminal(trimmedData) {
 				sawTerminalEvent = true
 			}
@@ -3927,7 +3935,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 		).Info("OpenAI passthrough 上游流在未收到 [DONE] 时结束，疑似断流")
 		if !openAIStreamClientOutputStarted(c, clientOutputStarted) {
 			return resultWithUsage(),
-				s.newOpenAIStreamFailoverError(c, account, true, upstreamRequestID, nil, "OpenAI stream ended before a terminal event")
+				s.newOpenAIStreamFailoverError(c, account, true, upstreamRequestID, nil, "OpenAI stream ended before first data event")
 		}
 		return resultWithUsage(), errors.New("stream usage incomplete: missing terminal event")
 	}
@@ -4596,7 +4604,7 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 					false,
 					upstreamRequestID,
 					nil,
-					"OpenAI stream ended before a terminal event",
+					"OpenAI stream ended before first data event",
 				)
 			}
 			return resultWithUsage(), fmt.Errorf("stream usage incomplete: missing terminal event")
@@ -6146,6 +6154,39 @@ func extractOpenAIRequestMetaFromBody(body []byte) (model string, stream bool, p
 // normalizeOpenAIPassthroughOAuthBody 将透传 OAuth 请求体收敛为旧链路关键行为：
 // 1) 删除 ChatGPT internal API 不支持的顶层 Responses 参数
 // 2) store=false 3) 非 compact 保持 stream=true；compact 强制 stream=false
+func normalizeOpenAIPassthroughNonCodexOAuthBody(body []byte) ([]byte, bool, error) {
+	normalized := body
+	changed := false
+	if isOpenAIInstructionsMissingOrEmpty(normalized) {
+		next, err := sjson.SetBytes(normalized, "instructions", "You are a helpful coding assistant.")
+		if err != nil {
+			return body, false, fmt.Errorf("normalize passthrough body default instructions: %w", err)
+		}
+		normalized = next
+		changed = true
+	}
+	for _, field := range openAICodexOAuthUnsupportedFields {
+		if !gjson.GetBytes(normalized, field).Exists() {
+			continue
+		}
+		next, err := sjson.DeleteBytes(normalized, field)
+		if err != nil {
+			return body, false, fmt.Errorf("normalize passthrough body delete %s: %w", field, err)
+		}
+		normalized = next
+		changed = true
+	}
+	return normalized, changed, nil
+}
+
+func isOpenAIInstructionsMissingOrEmpty(body []byte) bool {
+	instructions := gjson.GetBytes(body, "instructions")
+	if !instructions.Exists() || instructions.Type != gjson.String {
+		return true
+	}
+	return strings.TrimSpace(instructions.String()) == ""
+}
+
 func normalizeOpenAIPassthroughOAuthBody(body []byte, compact bool) ([]byte, bool, error) {
 	if len(body) == 0 {
 		return body, false, nil
