@@ -12,17 +12,23 @@ import "encoding/json"
 
 // AnthropicRequest is the request body for POST /v1/messages.
 type AnthropicRequest struct {
-	Model        string                 `json:"model"`
-	MaxTokens    int                    `json:"max_tokens"`
-	System       json.RawMessage        `json:"system,omitempty"` // string or []AnthropicContentBlock
-	Messages     []AnthropicMessage     `json:"messages"`
-	Tools        []AnthropicTool        `json:"tools,omitempty"`
-	Stream       bool                   `json:"stream,omitempty"`
-	Temperature  *float64               `json:"temperature,omitempty"`
-	TopP         *float64               `json:"top_p,omitempty"`
-	StopSeqs     []string               `json:"stop_sequences,omitempty"`
-	Thinking     *AnthropicThinking     `json:"thinking,omitempty"`
-	ToolChoice   json.RawMessage        `json:"tool_choice,omitempty"`
+	Model       string             `json:"model"`
+	MaxTokens   int                `json:"max_tokens"`
+	System      json.RawMessage    `json:"system,omitempty"` // string or []AnthropicContentBlock
+	Messages    []AnthropicMessage `json:"messages"`
+	Tools       []AnthropicTool    `json:"tools,omitempty"`
+	Stream      bool               `json:"stream,omitempty"`
+	Temperature *float64           `json:"temperature,omitempty"`
+	TopP        *float64           `json:"top_p,omitempty"`
+	StopSeqs    []string           `json:"stop_sequences,omitempty"`
+	Thinking    *AnthropicThinking `json:"thinking,omitempty"`
+	ToolChoice  json.RawMessage    `json:"tool_choice,omitempty"`
+	// Metadata 会被原样透传给上游。OAuth/Claude-Code 路径依赖 metadata.user_id
+	// 参与上游的"是否为官方 Claude Code 请求"判定；如果经由本结构体重新序列化
+	// 时丢弃该字段，网关侧后续的 metadata 重写(ensureClaudeOAuthMetadataUserID/
+	// RewriteUserIDWithMasking) 在 body 里拿不到起点，就无法重建一个合法的
+	// user_id，进而导致请求被归类为第三方 app。
+	Metadata     json.RawMessage        `json:"metadata,omitempty"`
 	OutputConfig *AnthropicOutputConfig `json:"output_config,omitempty"`
 }
 
@@ -46,6 +52,8 @@ type AnthropicMessage struct {
 // AnthropicContentBlock is one block inside a message's content array.
 type AnthropicContentBlock struct {
 	Type string `json:"type"`
+
+	CacheControl *AnthropicCacheControl `json:"cache_control,omitempty"`
 
 	// type=text
 	Text string `json:"text,omitempty"`
@@ -76,10 +84,18 @@ type AnthropicImageSource struct {
 
 // AnthropicTool describes a tool available to the model.
 type AnthropicTool struct {
-	Type        string          `json:"type,omitempty"` // e.g. "web_search_20250305" for server tools
-	Name        string          `json:"name"`
-	Description string          `json:"description,omitempty"`
-	InputSchema json.RawMessage `json:"input_schema"` // JSON Schema object
+	Type         string                 `json:"type,omitempty"` // e.g. "web_search_20250305" for server tools
+	Name         string                 `json:"name"`
+	Description  string                 `json:"description,omitempty"`
+	InputSchema  json.RawMessage        `json:"input_schema"` // JSON Schema object
+	CacheControl *AnthropicCacheControl `json:"cache_control,omitempty"`
+}
+
+// AnthropicCacheControl 对应 Anthropic API 的 cache_control 字段。
+// ttl 默认由调用方决定；本项目策略见 claude.DefaultCacheControlTTL。
+type AnthropicCacheControl struct {
+	Type string `json:"type"`          // "ephemeral"
+	TTL  string `json:"ttl,omitempty"` // "5m" / "1h" / 省略=默认 5m（由 Anthropic 判定）
 }
 
 // AnthropicResponse is the non-streaming response from POST /v1/messages.
@@ -151,19 +167,23 @@ type AnthropicDelta struct {
 
 // ResponsesRequest is the request body for POST /v1/responses.
 type ResponsesRequest struct {
-	Model           string              `json:"model"`
-	Instructions    string              `json:"instructions,omitempty"`
-	Input           json.RawMessage     `json:"input"` // string or []ResponsesInputItem
-	MaxOutputTokens *int                `json:"max_output_tokens,omitempty"`
-	Temperature     *float64            `json:"temperature,omitempty"`
-	TopP            *float64            `json:"top_p,omitempty"`
-	Stream          bool                `json:"stream,omitempty"`
-	Tools           []ResponsesTool     `json:"tools,omitempty"`
-	Include         []string            `json:"include,omitempty"`
-	Store           *bool               `json:"store,omitempty"`
-	Reasoning       *ResponsesReasoning `json:"reasoning,omitempty"`
-	ToolChoice      json.RawMessage     `json:"tool_choice,omitempty"`
-	ServiceTier     string              `json:"service_tier,omitempty"`
+	Model              string              `json:"model"`
+	Instructions       string              `json:"instructions,omitempty"`
+	Input              json.RawMessage     `json:"input"` // string or []ResponsesInputItem
+	MaxOutputTokens    *int                `json:"max_output_tokens,omitempty"`
+	Temperature        *float64            `json:"temperature,omitempty"`
+	TopP               *float64            `json:"top_p,omitempty"`
+	Stream             bool                `json:"stream,omitempty"`
+	Tools              []ResponsesTool     `json:"tools,omitempty"`
+	Include            []string            `json:"include,omitempty"`
+	Store              *bool               `json:"store,omitempty"`
+	ParallelToolCalls  *bool               `json:"parallel_tool_calls,omitempty"`
+	Reasoning          *ResponsesReasoning `json:"reasoning,omitempty"`
+	Text               *ResponsesText      `json:"text,omitempty"`
+	ToolChoice         json.RawMessage     `json:"tool_choice,omitempty"`
+	ServiceTier        string              `json:"service_tier,omitempty"`
+	PromptCacheKey     string              `json:"prompt_cache_key,omitempty"`
+	PreviousResponseID string              `json:"previous_response_id,omitempty"`
 }
 
 // ResponsesReasoning configures reasoning effort in the Responses API.
@@ -172,13 +192,18 @@ type ResponsesReasoning struct {
 	Summary string `json:"summary,omitempty"` // "auto" | "concise" | "detailed"
 }
 
+// ResponsesText configures text output options in the Responses API.
+type ResponsesText struct {
+	Verbosity string `json:"verbosity,omitempty"` // "low" | "medium" | "high"
+}
+
 // ResponsesInputItem is one item in the Responses API input array.
 // The Type field determines which other fields are populated.
 type ResponsesInputItem struct {
 	// Common
 	Type string `json:"type,omitempty"` // "" for role-based messages
 
-	// Role-based messages (system/user/assistant)
+	// Role-based messages (developer/system/user/assistant)
 	Role    string          `json:"role,omitempty"`
 	Content json.RawMessage `json:"content,omitempty"` // string or []ResponsesContentPart
 
@@ -300,7 +325,7 @@ type ResponsesOutputTokensDetails struct {
 type ResponsesStreamEvent struct {
 	Type string `json:"type"`
 
-	// response.created / response.completed / response.failed / response.incomplete
+	// response.created / response.completed / response.done / response.failed / response.incomplete
 	Response *ResponsesResponse `json:"response,omitempty"`
 
 	// response.output_item.added / response.output_item.done

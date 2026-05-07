@@ -625,6 +625,9 @@ func normalizeModelNameForPricing(model string) string {
 	}
 
 	model = strings.TrimLeft(model, "/")
+	if canonical := canonicalizeOpenAIModelAliasSpelling(model); canonical != "" {
+		return canonical
+	}
 	return model
 }
 
@@ -817,6 +820,16 @@ func (s *PricingService) matchOpenAIModel(model string) *LiteLLMModelPricing {
 		logger.With(zap.String("component", "service.pricing")).
 			Info(fmt.Sprintf("[Pricing] OpenAI fallback matched %s -> %s", model, "gpt-5.4(static)"))
 		return openAIGPT54FallbackPricing
+	}
+
+	if isOpenAIImageGenerationModel(model) {
+		for _, candidate := range []string{"gpt-image-2", "gpt-image-1.5", "gpt-image-1"} {
+			if pricing, ok := s.pricingData[candidate]; ok {
+				logger.LegacyPrintf("service.pricing", "[Pricing] OpenAI image fallback matched %s -> %s", model, candidate)
+				return pricing
+			}
+		}
+		return nil
 	}
 
 	// 最终回退到 DefaultTestModel

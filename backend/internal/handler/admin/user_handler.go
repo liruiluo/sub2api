@@ -40,6 +40,7 @@ type CreateUserRequest struct {
 	Notes         string  `json:"notes"`
 	Balance       float64 `json:"balance"`
 	Concurrency   int     `json:"concurrency"`
+	RPMLimit      int     `json:"rpm_limit"`
 	AllowedGroups []int64 `json:"allowed_groups"`
 }
 
@@ -52,6 +53,7 @@ type UpdateUserRequest struct {
 	Notes         *string  `json:"notes"`
 	Balance       *float64 `json:"balance"`
 	Concurrency   *int     `json:"concurrency"`
+	RPMLimit      *int     `json:"rpm_limit"`
 	Status        string   `json:"status" binding:"omitempty,oneof=active disabled"`
 	AllowedGroups *[]int64 `json:"allowed_groups"`
 	// GroupRates 用户专属分组倍率配置
@@ -64,6 +66,22 @@ type UpdateBalanceRequest struct {
 	Balance   float64 `json:"balance" binding:"required,gt=0"`
 	Operation string  `json:"operation" binding:"required,oneof=set add subtract"`
 	Notes     string  `json:"notes"`
+}
+
+type BindUserAuthIdentityRequest struct {
+	ProviderType    string                              `json:"provider_type"`
+	ProviderKey     string                              `json:"provider_key"`
+	ProviderSubject string                              `json:"provider_subject"`
+	Issuer          *string                             `json:"issuer"`
+	Metadata        map[string]any                      `json:"metadata"`
+	Channel         *BindUserAuthIdentityChannelRequest `json:"channel"`
+}
+
+type BindUserAuthIdentityChannelRequest struct {
+	Channel        string         `json:"channel"`
+	ChannelAppID   string         `json:"channel_app_id"`
+	ChannelSubject string         `json:"channel_subject"`
+	Metadata       map[string]any `json:"metadata"`
 }
 
 // List handles listing all users with pagination
@@ -172,6 +190,45 @@ func (h *UserHandler) GetByID(c *gin.Context) {
 	response.Success(c, dto.UserFromServiceAdmin(user))
 }
 
+// BindAuthIdentity manually binds a canonical auth identity to a user.
+// POST /api/v1/admin/users/:id/auth-identities
+func (h *UserHandler) BindAuthIdentity(c *gin.Context) {
+	userID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid user ID")
+		return
+	}
+
+	var req BindUserAuthIdentityRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+
+	input := service.AdminBindAuthIdentityInput{
+		ProviderType:    req.ProviderType,
+		ProviderKey:     req.ProviderKey,
+		ProviderSubject: req.ProviderSubject,
+		Issuer:          req.Issuer,
+		Metadata:        req.Metadata,
+	}
+	if req.Channel != nil {
+		input.Channel = &service.AdminBindAuthIdentityChannelInput{
+			Channel:        req.Channel.Channel,
+			ChannelAppID:   req.Channel.ChannelAppID,
+			ChannelSubject: req.Channel.ChannelSubject,
+			Metadata:       req.Channel.Metadata,
+		}
+	}
+
+	result, err := h.adminService.BindUserAuthIdentity(c.Request.Context(), userID, input)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
 // Create handles creating a new user
 // POST /api/v1/admin/users
 func (h *UserHandler) Create(c *gin.Context) {
@@ -188,6 +245,7 @@ func (h *UserHandler) Create(c *gin.Context) {
 		Notes:         req.Notes,
 		Balance:       req.Balance,
 		Concurrency:   req.Concurrency,
+		RPMLimit:      req.RPMLimit,
 		AllowedGroups: req.AllowedGroups,
 	})
 	if err != nil {
@@ -221,6 +279,7 @@ func (h *UserHandler) Update(c *gin.Context) {
 		Notes:         req.Notes,
 		Balance:       req.Balance,
 		Concurrency:   req.Concurrency,
+		RPMLimit:      req.RPMLimit,
 		Status:        req.Status,
 		AllowedGroups: req.AllowedGroups,
 		GroupRates:    req.GroupRates,
@@ -331,7 +390,7 @@ func (h *UserHandler) GetUserUsage(c *gin.Context) {
 // GetBalanceHistory handles getting user's balance/concurrency change history
 // GET /api/v1/admin/users/:id/balance-history
 // Query params:
-//   - type: filter by record type (balance, admin_balance, concurrency, admin_concurrency, subscription)
+//   - type: filter by record type (balance, affiliate_balance, admin_balance, concurrency, admin_concurrency, subscription)
 func (h *UserHandler) GetBalanceHistory(c *gin.Context) {
 	userID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
@@ -399,4 +458,82 @@ func (h *UserHandler) ReplaceGroup(c *gin.Context) {
 	response.Success(c, gin.H{
 		"migrated_keys": result.MigratedKeys,
 	})
+}
+
+// GetUserRPMStatus 返回指定用户当前分钟的 RPM 用量
+// GET /api/v1/admin/users/:id/rpm-status
+func (h *UserHandler) GetUserRPMStatus(c *gin.Context) {
+	userID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid user ID")
+		return
+	}
+
+	status, err := h.adminService.GetUserRPMStatus(c.Request.Context(), userID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, status)
+}
+
+// BatchUpdateConcurrency 批量修改用户并发数
+// POST /api/v1/admin/users/batch-concurrency
+type BatchUpdateConcurrencyRequest struct {
+	UserIDs     []int64 `json:"user_ids"`
+	All         bool    `json:"all"`
+	Concurrency int     `json:"concurrency"`
+	Mode        string  `json:"mode" binding:"required,oneof=set add"`
+}
+
+func (h *UserHandler) BatchUpdateConcurrency(c *gin.Context) {
+	var req BatchUpdateConcurrencyRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	if !req.All && len(req.UserIDs) == 0 {
+		response.BadRequest(c, "user_ids is required unless all=true")
+		return
+	}
+	if len(req.UserIDs) > 500 {
+		response.BadRequest(c, "user_ids cannot exceed 500")
+		return
+	}
+
+	var userIDs []int64
+	if req.All {
+		// Fetch all user IDs via pagination
+		page := 1
+		const pageSize = 500
+		for {
+			users, _, err := h.adminService.ListUsers(c.Request.Context(), page, pageSize, service.UserListFilters{}, "id", "asc")
+			if err != nil {
+				response.ErrorFrom(c, err)
+				return
+			}
+			for _, u := range users {
+				userIDs = append(userIDs, u.ID)
+			}
+			if len(users) < pageSize {
+				break
+			}
+			page++
+		}
+	} else {
+		userIDs = req.UserIDs
+	}
+
+	if len(userIDs) == 0 {
+		response.Success(c, gin.H{"affected": 0})
+		return
+	}
+
+	affected, err := h.adminService.BatchUpdateConcurrency(c.Request.Context(), userIDs, req.Concurrency, req.Mode)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"affected": affected})
 }

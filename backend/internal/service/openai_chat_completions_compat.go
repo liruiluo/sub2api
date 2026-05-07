@@ -43,17 +43,6 @@ func isOpenAIChatCompletionsCompatError(statusCode int, body []byte) bool {
 		(statusCode == http.StatusNotFound && strings.Contains(combined, "page not found"))
 }
 
-func buildOpenAIChatCompletionsURL(base string) string {
-	normalized := strings.TrimRight(strings.TrimSpace(base), "/")
-	if strings.HasSuffix(normalized, "/chat/completions") {
-		return normalized
-	}
-	if strings.HasSuffix(normalized, "/v1") {
-		return normalized + "/chat/completions"
-	}
-	return normalized + "/v1/chat/completions"
-}
-
 func (s *OpenAIGatewayService) markOpenAIChatCompletionsCompat(ctx context.Context, account *Account) {
 	if account == nil || !account.IsOpenAIApiKey() || account.IsOpenAIChatCompletionsCompatEnabled() {
 		return

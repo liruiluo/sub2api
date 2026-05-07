@@ -148,14 +148,15 @@ services:
       - UPDATE_PROXY_URL=${UPDATE_PROXY_URL:-}
 
       # =======================================================================
-      # Optional upstream proxy for all outbound HTTP(S) traffic from sub2api
-      # On this workstation we may point it at a host-side bridge-only forwarder
-      # that relays into the local Clash Verge mixed port.
+      # Image Generation Stream & Concurrency
       # =======================================================================
-      - HTTP_PROXY=${SUB2API_HTTP_PROXY:-}
-      - HTTPS_PROXY=${SUB2API_HTTPS_PROXY:-}
-      - ALL_PROXY=${SUB2API_ALL_PROXY:-}
-      - NO_PROXY=${SUB2API_NO_PROXY:-}
+      - GATEWAY_IMAGE_STREAM_DATA_INTERVAL_TIMEOUT=${GATEWAY_IMAGE_STREAM_DATA_INTERVAL_TIMEOUT:-900}
+      - GATEWAY_IMAGE_STREAM_KEEPALIVE_INTERVAL=${GATEWAY_IMAGE_STREAM_KEEPALIVE_INTERVAL:-10}
+      - GATEWAY_IMAGE_CONCURRENCY_ENABLED=${GATEWAY_IMAGE_CONCURRENCY_ENABLED:-false}
+      - GATEWAY_IMAGE_CONCURRENCY_MAX_CONCURRENT_REQUESTS=${GATEWAY_IMAGE_CONCURRENCY_MAX_CONCURRENT_REQUESTS:-0}
+      - GATEWAY_IMAGE_CONCURRENCY_OVERFLOW_MODE=${GATEWAY_IMAGE_CONCURRENCY_OVERFLOW_MODE:-reject}
+      - GATEWAY_IMAGE_CONCURRENCY_WAIT_TIMEOUT_SECONDS=${GATEWAY_IMAGE_CONCURRENCY_WAIT_TIMEOUT_SECONDS:-30}
+      - GATEWAY_IMAGE_CONCURRENCY_MAX_WAITING_REQUESTS=${GATEWAY_IMAGE_CONCURRENCY_MAX_WAITING_REQUESTS:-100}
     depends_on:
       postgres:
         condition: service_healthy

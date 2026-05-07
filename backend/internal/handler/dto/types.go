@@ -7,16 +7,17 @@ import (
 )
 
 type User struct {
-	ID            int64     `json:"id"`
-	Email         string    `json:"email"`
-	Username      string    `json:"username"`
-	Role          string    `json:"role"`
-	Balance       float64   `json:"balance"`
-	Concurrency   int       `json:"concurrency"`
-	Status        string    `json:"status"`
-	AllowedGroups []int64   `json:"allowed_groups"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID            int64      `json:"id"`
+	Email         string     `json:"email"`
+	Username      string     `json:"username"`
+	Role          string     `json:"role"`
+	Balance       float64    `json:"balance"`
+	Concurrency   int        `json:"concurrency"`
+	Status        string     `json:"status"`
+	AllowedGroups []int64    `json:"allowed_groups"`
+	LastActiveAt  *time.Time `json:"last_active_at,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 
 	// 余额不足通知
 	BalanceNotifyEnabled       bool               `json:"balance_notify_enabled"`
@@ -24,6 +25,9 @@ type User struct {
 	BalanceNotifyThreshold     *float64           `json:"balance_notify_threshold"`
 	BalanceNotifyExtraEmails   []NotifyEmailEntry `json:"balance_notify_extra_emails"`
 	TotalRecharged             float64            `json:"total_recharged"`
+
+	// RPMLimit 用户级每分钟请求数上限（0 = 不限制），仅在所用分组未设置 rpm_limit 时作为兜底生效。
+	RPMLimit int `json:"rpm_limit"`
 
 	APIKeys       []APIKey           `json:"api_keys,omitempty"`
 	Subscriptions []UserSubscription `json:"subscriptions,omitempty"`
@@ -34,7 +38,8 @@ type User struct {
 type AdminUser struct {
 	User
 
-	Notes string `json:"notes"`
+	Notes      string     `json:"notes"`
+	LastUsedAt *time.Time `json:"last_used_at"`
 	// GroupRates 用户专属分组倍率配置
 	// map[groupID]rateMultiplier
 	GroupRates map[int64]float64 `json:"group_rates,omitempty"`
@@ -89,9 +94,12 @@ type Group struct {
 	MonthlyLimitUSD  *float64 `json:"monthly_limit_usd"`
 
 	// 图片生成计费配置（仅 antigravity 平台使用）
-	ImagePrice1K *float64 `json:"image_price_1k"`
-	ImagePrice2K *float64 `json:"image_price_2k"`
-	ImagePrice4K *float64 `json:"image_price_4k"`
+	AllowImageGeneration bool     `json:"allow_image_generation"`
+	ImageRateIndependent bool     `json:"image_rate_independent"`
+	ImageRateMultiplier  float64  `json:"image_rate_multiplier"`
+	ImagePrice1K         *float64 `json:"image_price_1k"`
+	ImagePrice2K         *float64 `json:"image_price_2k"`
+	ImagePrice4K         *float64 `json:"image_price_4k"`
 
 	// Claude Code 客户端限制
 	ClaudeCodeOnly  bool   `json:"claude_code_only"`
@@ -105,6 +113,9 @@ type Group struct {
 	// 账号过滤控制（仅 OpenAI/Antigravity 平台有效）
 	RequireOAuthOnly  bool `json:"require_oauth_only"`
 	RequirePrivacySet bool `json:"require_privacy_set"`
+
+	// RPMLimit 分组级每分钟请求数上限（0 = 不限制），设置后覆盖用户级 rpm_limit。
+	RPMLimit int `json:"rpm_limit"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

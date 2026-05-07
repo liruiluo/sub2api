@@ -68,10 +68,12 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/auth/callback',
     name: 'OAuthCallback',
+    alias: '/auth/oauth/callback',
     component: () => import('@/views/auth/OAuthCallbackView.vue'),
     meta: {
       requiresAuth: false,
-      title: 'OAuth Callback'
+      title: 'OAuth Callback',
+      titleKey: 'auth.oauthCallbackPageTitle'
     }
   },
   {
@@ -80,7 +82,28 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/auth/LinuxDoCallbackView.vue'),
     meta: {
       requiresAuth: false,
-      title: 'LinuxDo OAuth Callback'
+      title: 'LinuxDo OAuth Callback',
+      titleKey: 'auth.linuxdoCallbackPageTitle'
+    }
+  },
+  {
+    path: '/auth/wechat/callback',
+    name: 'WeChatOAuthCallback',
+    component: () => import('@/views/auth/WechatCallbackView.vue'),
+    meta: {
+      requiresAuth: false,
+      title: 'WeChat OAuth Callback',
+      titleKey: 'auth.wechatCallbackPageTitle'
+    }
+  },
+  {
+    path: '/auth/wechat/payment/callback',
+    name: 'WeChatPaymentOAuthCallback',
+    component: () => import('@/views/auth/WechatPaymentCallbackView.vue'),
+    meta: {
+      requiresAuth: false,
+      title: 'WeChat Payment Callback',
+      titleKey: 'auth.wechatPaymentCallbackPageTitle'
     }
   },
   {
@@ -89,7 +112,8 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/auth/OidcCallbackView.vue'),
     meta: {
       requiresAuth: false,
-      title: 'OIDC OAuth Callback'
+      title: 'OIDC OAuth Callback',
+      titleKey: 'auth.oidcCallbackPageTitle'
     }
   },
   {
@@ -175,6 +199,30 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/affiliate',
+    name: 'Affiliate',
+    component: () => import('@/views/user/AffiliateView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'Affiliate',
+      titleKey: 'affiliate.title',
+      descriptionKey: 'affiliate.description'
+    }
+  },
+  {
+    path: '/available-channels',
+    name: 'UserAvailableChannels',
+    component: () => import('@/views/user/AvailableChannelsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'Available Channels',
+      titleKey: 'availableChannels.title',
+      descriptionKey: 'availableChannels.description'
+    }
+  },
+  {
     path: '/profile',
     name: 'Profile',
     component: () => import('@/views/user/ProfileView.vue'),
@@ -252,11 +300,11 @@ const routes: RouteRecordRaw[] = [
     name: 'StripePayment',
     component: () => import('@/views/user/StripePaymentView.vue'),
     meta: {
-      requiresAuth: true,
+      requiresAuth: false,
       requiresAdmin: false,
       title: 'Stripe Payment',
       titleKey: 'payment.stripePay',
-      requiresPayment: true
+      requiresPayment: false
     }
   },
   {
@@ -264,10 +312,10 @@ const routes: RouteRecordRaw[] = [
     name: 'StripePopup',
     component: () => import('@/views/user/StripePopupView.vue'),
     meta: {
-      requiresAuth: true,
+      requiresAuth: false,
       requiresAdmin: false,
       title: 'Payment',
-      requiresPayment: true
+      requiresPayment: false
     }
   },
   {
@@ -337,6 +385,10 @@ const routes: RouteRecordRaw[] = [
   },
   {
     path: '/admin/channels',
+    redirect: '/admin/channels/pricing'
+  },
+  {
+    path: '/admin/channels/pricing',
     name: 'AdminChannels',
     component: () => import('@/views/admin/ChannelsView.vue'),
     meta: {
@@ -345,6 +397,29 @@ const routes: RouteRecordRaw[] = [
       title: 'Channel Management',
       titleKey: 'admin.channels.title',
       descriptionKey: 'admin.channels.description'
+    }
+  },
+  {
+    path: '/admin/channels/monitor',
+    name: 'AdminChannelMonitor',
+    component: () => import('@/views/admin/ChannelMonitorView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Channel Monitor',
+      titleKey: 'admin.channelMonitor.title',
+      descriptionKey: 'admin.channelMonitor.description'
+    }
+  },
+  {
+    path: '/monitor',
+    name: 'ChannelStatus',
+    component: () => import('@/views/user/ChannelStatusView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'Channel Status',
+      titleKey: 'nav.channelStatus'
     }
   },
   {
@@ -432,6 +507,19 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/risk-control',
+    name: 'AdminRiskControl',
+    component: () => import('@/views/admin/RiskControlView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Risk Control',
+      titleKey: 'admin.riskControl.title',
+      descriptionKey: 'admin.riskControl.description',
+      requiresRiskControl: true
+    }
+  },
+  {
     path: '/admin/usage',
     name: 'AdminUsage',
     component: () => import('@/views/admin/UsageView.vue'),
@@ -441,6 +529,46 @@ const routes: RouteRecordRaw[] = [
       title: 'Usage Records',
       titleKey: 'admin.usage.title',
       descriptionKey: 'admin.usage.description'
+    }
+  },
+  {
+    path: '/admin/affiliates',
+    redirect: '/admin/affiliates/invites'
+  },
+  {
+    path: '/admin/affiliates/invites',
+    name: 'AdminAffiliateInvites',
+    component: () => import('@/views/admin/affiliates/AdminAffiliateInvitesView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Affiliate Invite Records',
+      titleKey: 'nav.affiliateInviteRecords',
+      descriptionKey: 'admin.affiliates.invitesDescription'
+    }
+  },
+  {
+    path: '/admin/affiliates/rebates',
+    name: 'AdminAffiliateRebates',
+    component: () => import('@/views/admin/affiliates/AdminAffiliateRebatesView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Affiliate Rebate Records',
+      titleKey: 'nav.affiliateRebateRecords',
+      descriptionKey: 'admin.affiliates.rebatesDescription'
+    }
+  },
+  {
+    path: '/admin/affiliates/transfers',
+    name: 'AdminAffiliateTransfers',
+    component: () => import('@/views/admin/affiliates/AdminAffiliateTransfersView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Affiliate Transfer Records',
+      titleKey: 'nav.affiliateTransferRecords',
+      descriptionKey: 'admin.affiliates.transfersDescription'
     }
   },
 
@@ -519,7 +647,31 @@ let authInitialized = false
 const navigationLoading = useNavigationLoadingState()
 // 延迟初始化预加载，传入 router 实例
 let routePrefetch: ReturnType<typeof useRoutePrefetch> | null = null
-const BACKEND_MODE_ALLOWED_PATHS = ['/login', '/key-usage', '/setup']
+const BACKEND_MODE_ALLOWED_PATHS = ['/login', '/key-usage', '/setup', '/payment/result']
+const BACKEND_MODE_CALLBACK_PATHS = [
+  '/auth/callback',
+  '/auth/linuxdo/callback',
+  '/auth/oidc/callback',
+  '/auth/wechat/callback',
+  '/auth/wechat/payment/callback',
+]
+const BACKEND_MODE_PENDING_AUTH_PATHS = ['/register', '/email-verify']
+
+function isBackendModePublicRouteAllowed(path: string, hasPendingAuthSession: boolean): boolean {
+  if (BACKEND_MODE_ALLOWED_PATHS.some((allowedPath) => path === allowedPath || path.startsWith(allowedPath))) {
+    return true
+  }
+
+  if (BACKEND_MODE_CALLBACK_PATHS.some((callbackPath) => path === callbackPath)) {
+    return true
+  }
+
+  if (hasPendingAuthSession && BACKEND_MODE_PENDING_AUTH_PATHS.some((allowedPath) => path === allowedPath)) {
+    return true
+  }
+
+  return false
+}
 
 router.beforeEach((to, _from, next) => {
   // 开始导航加载状态
@@ -572,7 +724,7 @@ router.beforeEach((to, _from, next) => {
     }
     // Backend mode: block public pages for unauthenticated users (except login, key-usage, setup)
     if (appStore.backendModeEnabled && !authStore.isAuthenticated) {
-      const isAllowed = BACKEND_MODE_ALLOWED_PATHS.some((p) => to.path === p || to.path.startsWith(p))
+      const isAllowed = isBackendModePublicRouteAllowed(to.path, authStore.hasPendingAuthSession)
       if (!isAllowed) {
         next('/login')
         return
@@ -609,6 +761,14 @@ router.beforeEach((to, _from, next) => {
     }
   }
 
+  if (to.meta.requiresRiskControl) {
+    const riskControlEnabled = appStore.cachedPublicSettings?.risk_control_enabled === true
+    if (!riskControlEnabled) {
+      next(authStore.isAdmin ? '/admin/settings' : '/dashboard')
+      return
+    }
+  }
+
   // 简易模式下限制访问某些页面
   if (authStore.isSimpleMode) {
     const restrictedPaths = [
@@ -632,7 +792,7 @@ router.beforeEach((to, _from, next) => {
       next()
       return
     }
-    const isAllowed = BACKEND_MODE_ALLOWED_PATHS.some((p) => to.path === p || to.path.startsWith(p))
+    const isAllowed = isBackendModePublicRouteAllowed(to.path, authStore.hasPendingAuthSession)
     if (!isAllowed) {
       next('/login')
       return

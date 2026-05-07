@@ -309,11 +309,13 @@
                 }}</span>
               </button>
               <button
-                @click="handleRateMultipliers(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-purple-600 dark:hover:bg-dark-700 dark:hover:text-purple-400"
+                @click="handleRPMOverrides(row)"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-orange-600 dark:hover:bg-dark-700 dark:hover:text-orange-400"
               >
-                <Icon name="dollar" size="sm" />
-                <span class="text-xs">{{ t('admin.groups.rateMultipliers') }}</span>
+                <Icon name="bolt" size="sm" />
+                <span class="text-xs">{{
+                  t("admin.groups.rpmOverrides")
+                }}</span>
               </button>
               <button
                 @click="handleDelete(row)"
@@ -498,6 +500,18 @@
           />
           <p class="input-hint">{{ t("admin.groups.rateMultiplierHint") }}</p>
         </div>
+        <div>
+          <label class="input-label">{{ t("admin.groups.form.rpmLimit") }}</label>
+          <input
+            v-model.number="createForm.rpm_limit"
+            type="number"
+            min="0"
+            step="1"
+            class="input"
+            :placeholder="t('admin.groups.form.rpmLimitPlaceholder')"
+          />
+          <p class="input-hint">{{ t("admin.groups.form.rpmLimitHint") }}</p>
+        </div>
         <div
           v-if="createForm.subscription_type !== 'subscription'"
           data-tour="group-form-exclusive"
@@ -635,11 +649,12 @@
           </div>
         </div>
 
-        <!-- 图片生成计费配置（antigravity 和 gemini 平台） -->
+        <!-- 图片生成计费配置 -->
         <div
           v-if="
             createForm.platform === 'antigravity' ||
-            createForm.platform === 'gemini'
+            createForm.platform === 'gemini' ||
+            createForm.platform === 'openai'
           "
           class="border-t pt-4"
         >
@@ -651,6 +666,40 @@
           <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">
             {{ t("admin.groups.imagePricing.description") }}
           </p>
+          <div class="mb-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+            <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+              <input
+                v-model="createForm.allow_image_generation"
+                type="checkbox"
+                class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              {{ t("admin.groups.imagePricing.allowImageGeneration") }}
+            </label>
+            <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+              <input
+                v-model="createForm.image_rate_independent"
+                type="checkbox"
+                class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              {{ t("admin.groups.imagePricing.independentMultiplier") }}
+            </label>
+          </div>
+          <div
+            v-if="createForm.image_rate_independent"
+            class="mb-4"
+          >
+            <label class="input-label">{{
+              t("admin.groups.imagePricing.imageMultiplier")
+            }}</label>
+            <input
+              v-model.number="createForm.image_rate_multiplier"
+              type="number"
+              step="0.0001"
+              min="0"
+              class="input"
+              placeholder="1"
+            />
+          </div>
           <div class="grid grid-cols-3 gap-3">
             <div>
               <label class="input-label">1K ($)</label>
@@ -684,6 +733,22 @@
                 class="input"
                 placeholder="0.268"
               />
+            </div>
+          </div>
+          <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">
+            {{ t("admin.groups.imagePricing.modeHint") }}
+          </p>
+          <div class="mt-2 rounded-lg bg-gray-50 p-3 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+            <div class="mb-1 font-medium">
+              {{ t("admin.groups.imagePricing.finalPricePreview") }}
+            </div>
+            <div class="grid grid-cols-3 gap-2">
+              <div
+                v-for="item in createImageFinalPricePreview"
+                :key="item.label"
+              >
+                {{ item.label }}: {{ item.value }}
+              </div>
             </div>
           </div>
         </div>
@@ -1670,6 +1735,18 @@
             data-tour="group-form-multiplier"
           />
         </div>
+        <div>
+          <label class="input-label">{{ t("admin.groups.form.rpmLimit") }}</label>
+          <input
+            v-model.number="editForm.rpm_limit"
+            type="number"
+            min="0"
+            step="1"
+            class="input"
+            :placeholder="t('admin.groups.form.rpmLimitPlaceholder')"
+          />
+          <p class="input-hint">{{ t("admin.groups.form.rpmLimitHint") }}</p>
+        </div>
         <div v-if="editForm.subscription_type !== 'subscription'">
           <div class="mb-1.5 flex items-center gap-1">
             <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -1809,11 +1886,12 @@
           </div>
         </div>
 
-        <!-- 图片生成计费配置（antigravity 和 gemini 平台） -->
+        <!-- 图片生成计费配置 -->
         <div
           v-if="
             editForm.platform === 'antigravity' ||
-            editForm.platform === 'gemini'
+            editForm.platform === 'gemini' ||
+            editForm.platform === 'openai'
           "
           class="border-t pt-4"
         >
@@ -1825,6 +1903,40 @@
           <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">
             {{ t("admin.groups.imagePricing.description") }}
           </p>
+          <div class="mb-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+            <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+              <input
+                v-model="editForm.allow_image_generation"
+                type="checkbox"
+                class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              {{ t("admin.groups.imagePricing.allowImageGeneration") }}
+            </label>
+            <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+              <input
+                v-model="editForm.image_rate_independent"
+                type="checkbox"
+                class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              {{ t("admin.groups.imagePricing.independentMultiplier") }}
+            </label>
+          </div>
+          <div
+            v-if="editForm.image_rate_independent"
+            class="mb-4"
+          >
+            <label class="input-label">{{
+              t("admin.groups.imagePricing.imageMultiplier")
+            }}</label>
+            <input
+              v-model.number="editForm.image_rate_multiplier"
+              type="number"
+              step="0.0001"
+              min="0"
+              class="input"
+              placeholder="1"
+            />
+          </div>
           <div class="grid grid-cols-3 gap-3">
             <div>
               <label class="input-label">1K ($)</label>
@@ -1858,6 +1970,22 @@
                 class="input"
                 placeholder="0.268"
               />
+            </div>
+          </div>
+          <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">
+            {{ t("admin.groups.imagePricing.modeHint") }}
+          </p>
+          <div class="mt-2 rounded-lg bg-gray-50 p-3 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+            <div class="mb-1 font-medium">
+              {{ t("admin.groups.imagePricing.finalPricePreview") }}
+            </div>
+            <div class="grid grid-cols-3 gap-2">
+              <div
+                v-for="item in editImageFinalPricePreview"
+                :key="item.label"
+              >
+                {{ item.label }}: {{ item.value }}
+              </div>
             </div>
           </div>
         </div>
@@ -2798,6 +2926,14 @@
       @close="showRateMultipliersModal = false"
       @success="loadGroups"
     />
+
+    <!-- Group RPM Overrides Modal -->
+    <GroupRPMOverridesModal
+      :show="showRPMOverridesModal"
+      :group="rpmOverridesGroup"
+      @close="showRPMOverridesModal = false"
+      @success="loadGroups"
+    />
   </AppLayout>
 </template>
 
@@ -2820,6 +2956,7 @@ import Select from "@/components/common/Select.vue";
 import PlatformIcon from "@/components/common/PlatformIcon.vue";
 import Icon from "@/components/icons/Icon.vue";
 import GroupRateMultipliersModal from "@/components/admin/group/GroupRateMultipliersModal.vue";
+import GroupRPMOverridesModal from "@/components/admin/group/GroupRPMOverridesModal.vue";
 import GroupCapacityBadge from "@/components/common/GroupCapacityBadge.vue";
 import { VueDraggable } from "vue-draggable-plus";
 import { createStableObjectKeyResolver } from "@/utils/stableObjectKey";
@@ -3060,6 +3197,8 @@ const editingGroup = ref<AdminGroup | null>(null);
 const deletingGroup = ref<AdminGroup | null>(null);
 const showRateMultipliersModal = ref(false);
 const rateMultipliersGroup = ref<AdminGroup | null>(null);
+const showRPMOverridesModal = ref(false);
+const rpmOverridesGroup = ref<AdminGroup | null>(null);
 const sortableGroups = ref<AdminGroup[]>([]);
 const createMessagesDispatchDefaults = createDefaultMessagesDispatchFormState();
 const editMessagesDispatchDefaults = createDefaultMessagesDispatchFormState();
@@ -3074,7 +3213,10 @@ const createForm = reactive({
   daily_limit_usd: null as number | null,
   weekly_limit_usd: null as number | null,
   monthly_limit_usd: null as number | null,
-  // 图片生成计费配置（仅 antigravity 平台使用）
+  // 图片生成计费配置
+  allow_image_generation: false,
+  image_rate_independent: false,
+  image_rate_multiplier: 1,
   image_price_1k: null as number | null,
   image_price_2k: null as number | null,
   image_price_4k: null as number | null,
@@ -3101,6 +3243,8 @@ const createForm = reactive({
   mcp_xml_inject: true,
   // 从分组复制账号
   copy_accounts_from_group_ids: [] as number[],
+  // 分组级 RPM 限制（每用户每分钟最大请求数；0 = 不限制）
+  rpm_limit: 0 as number,
 });
 
 // 简单账号类型（用于模型路由选择）
@@ -3356,7 +3500,10 @@ const editForm = reactive({
   daily_limit_usd: null as number | null,
   weekly_limit_usd: null as number | null,
   monthly_limit_usd: null as number | null,
-  // 图片生成计费配置（仅 antigravity 平台使用）
+  // 图片生成计费配置
+  allow_image_generation: false,
+  image_rate_independent: false,
+  image_rate_multiplier: 1,
   image_price_1k: null as number | null,
   image_price_2k: null as number | null,
   image_price_4k: null as number | null,
@@ -3384,7 +3531,65 @@ const editForm = reactive({
   mcp_xml_inject: true,
   // 从分组复制账号
   copy_accounts_from_group_ids: [] as number[],
+  // 分组级 RPM 限制（每用户每分钟最大请求数；0 = 不限制）
+  rpm_limit: 0 as number,
 });
+
+type ImagePricingFormState = {
+  rate_multiplier: number;
+  image_rate_independent: boolean;
+  image_rate_multiplier: number;
+  image_price_1k: number | string | null;
+  image_price_2k: number | string | null;
+  image_price_4k: number | string | null;
+};
+
+const imagePricingTiers = [
+  { key: "image_price_1k", label: "1K" },
+  { key: "image_price_2k", label: "2K" },
+  { key: "image_price_4k", label: "4K" },
+] as const;
+
+const normalizePreviewNumber = (value: number | string | null | undefined, fallback = 0) => {
+  if (value === null || value === undefined || value === "") {
+    return fallback;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const formatImagePricePreview = (value: number | string | null | undefined) => {
+  if (value === null || value === undefined || value === "") {
+    return t("admin.groups.imagePricing.notConfigured");
+  }
+  const price = Number(value);
+  if (!Number.isFinite(price) || price < 0) {
+    return t("admin.groups.imagePricing.notConfigured");
+  }
+  return `$${price.toFixed(6).replace(/0+$/, "").replace(/\.$/, "")}`;
+};
+
+const buildImageFinalPricePreview = (form: ImagePricingFormState) => {
+  const multiplier = form.image_rate_independent
+    ? normalizePreviewNumber(form.image_rate_multiplier, 1)
+    : normalizePreviewNumber(form.rate_multiplier, 1);
+  return imagePricingTiers.map((tier) => {
+    const basePrice = normalizePreviewNumber(form[tier.key]);
+    return {
+      label: tier.label,
+      value: basePrice > 0
+        ? formatImagePricePreview(basePrice * multiplier)
+        : t("admin.groups.imagePricing.notConfigured"),
+    };
+  });
+};
+
+const createImageFinalPricePreview = computed(() =>
+  buildImageFinalPricePreview(createForm),
+);
+const editImageFinalPricePreview = computed(() =>
+  buildImageFinalPricePreview(editForm),
+);
 
 // 根据分组类型返回不同的删除确认消息
 const deleteConfirmMessage = computed(() => {
@@ -3544,6 +3749,9 @@ const closeCreateModal = () => {
   createForm.daily_limit_usd = null;
   createForm.weekly_limit_usd = null;
   createForm.monthly_limit_usd = null;
+  createForm.allow_image_generation = false;
+  createForm.image_rate_independent = false;
+  createForm.image_rate_multiplier = 1;
   createForm.image_price_1k = null;
   createForm.image_price_2k = null;
   createForm.image_price_4k = null;
@@ -3577,6 +3785,16 @@ const normalizeOptionalLimit = (
   }
 
   return Number.isFinite(value) && value > 0 ? value : null;
+};
+
+const normalizeImageRateMultiplier = (
+  value: number | string | null | undefined,
+): number => {
+  if (value === null || value === undefined || value === "") {
+    return 1;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 1;
 };
 
 const handleCreateGroup = async () => {
@@ -3621,6 +3839,9 @@ const handleCreateGroup = async () => {
     requestData.daily_limit_usd = emptyToNull(requestData.daily_limit_usd);
     requestData.weekly_limit_usd = emptyToNull(requestData.weekly_limit_usd);
     requestData.monthly_limit_usd = emptyToNull(requestData.monthly_limit_usd);
+    requestData.image_rate_multiplier = normalizeImageRateMultiplier(
+      requestData.image_rate_multiplier,
+    );
     await adminAPI.groups.create(requestData);
     appStore.showSuccess(t("admin.groups.groupCreated"));
     closeCreateModal();
@@ -3652,6 +3873,9 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.daily_limit_usd = group.daily_limit_usd;
   editForm.weekly_limit_usd = group.weekly_limit_usd;
   editForm.monthly_limit_usd = group.monthly_limit_usd;
+  editForm.allow_image_generation = group.allow_image_generation ?? false;
+  editForm.image_rate_independent = group.image_rate_independent ?? false;
+  editForm.image_rate_multiplier = group.image_rate_multiplier ?? 1;
   editForm.image_price_1k = group.image_price_1k;
   editForm.image_price_2k = group.image_price_2k;
   editForm.image_price_4k = group.image_price_4k;
@@ -3682,6 +3906,7 @@ const handleEdit = async (group: AdminGroup) => {
   ];
   editForm.mcp_xml_inject = group.mcp_xml_inject ?? true;
   editForm.copy_accounts_from_group_ids = []; // 复制账号字段每次编辑时重置为空
+  editForm.rpm_limit = group.rpm_limit ?? 0;
   // 加载模型路由规则（异步加载账号名称）
   editModelRoutingRules.value = await convertApiFormatToRoutingRules(
     group.model_routing,
@@ -3752,6 +3977,9 @@ const handleUpdateGroup = async () => {
     payload.daily_limit_usd = emptyToNull(payload.daily_limit_usd);
     payload.weekly_limit_usd = emptyToNull(payload.weekly_limit_usd);
     payload.monthly_limit_usd = emptyToNull(payload.monthly_limit_usd);
+    payload.image_rate_multiplier = normalizeImageRateMultiplier(
+      payload.image_rate_multiplier,
+    );
     await adminAPI.groups.update(editingGroup.value.id, payload);
     appStore.showSuccess(t("admin.groups.groupUpdated"));
     closeEditModal();
@@ -3793,6 +4021,11 @@ const removeEditMessagesDispatchMapping = (row: MessagesDispatchMappingRow) => {
 const handleRateMultipliers = (group: AdminGroup) => {
   rateMultipliersGroup.value = group;
   showRateMultipliersModal.value = true;
+};
+
+const handleRPMOverrides = (group: AdminGroup) => {
+  rpmOverridesGroup.value = group;
+  showRPMOverridesModal.value = true;
 };
 
 const handleDelete = (group: AdminGroup) => {

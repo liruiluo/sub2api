@@ -141,7 +141,17 @@
         </div>
       </template>
       <template #table>
-        <AccountBulkActionsBar :selected-ids="selIds" @delete="handleBulkDelete" @reset-status="handleBulkResetStatus" @refresh-token="handleBulkRefreshToken" @edit="showBulkEdit = true" @clear="clearSelection" @select-page="selectPage" @toggle-schedulable="handleBulkToggleSchedulable" />
+        <AccountBulkActionsBar
+          :selected-ids="selIds"
+          @delete="handleBulkDelete"
+          @reset-status="handleBulkResetStatus"
+          @refresh-token="handleBulkRefreshToken"
+          @edit-selected="openBulkEditSelected"
+          @edit-filtered="openBulkEditFiltered"
+          @clear="clearSelection"
+          @select-page="selectPage"
+          @toggle-schedulable="handleBulkToggleSchedulable"
+        />
         <div ref="accountTableRef" class="flex min-h-0 flex-1 flex-col overflow-hidden">
         <DataTable
           ref="dataTableRef"
@@ -186,14 +196,27 @@
             <span v-else class="text-sm text-gray-400 dark:text-dark-500">-</span>
           </template>
           <template #cell-platform_type="{ row }">
-            <div class="flex flex-wrap items-center gap-1">
-              <PlatformTypeBadge :platform="row.platform" :type="row.type" :plan-type="row.credentials?.plan_type" :privacy-mode="row.extra?.privacy_mode" :subscription-expires-at="row.credentials?.subscription_expires_at" />
-              <span
-                v-if="getAntigravityTierLabel(row)"
-                :class="['inline-block rounded px-1.5 py-0.5 text-[10px] font-medium', getAntigravityTierClass(row)]"
+            <div class="flex min-w-0 flex-col gap-1">
+              <div class="flex flex-wrap items-center gap-1">
+                <PlatformTypeBadge :platform="row.platform" :type="row.type" :plan-type="row.credentials?.plan_type" :privacy-mode="row.extra?.privacy_mode" :subscription-expires-at="row.credentials?.subscription_expires_at" />
+                <span
+                  v-if="getAntigravityTierLabel(row)"
+                  :class="['inline-block rounded px-1.5 py-0.5 text-[10px] font-medium', getAntigravityTierClass(row)]"
+                >
+                  {{ getAntigravityTierLabel(row) }}
+                </span>
+              </div>
+              <div
+                v-if="getOpenAICompactMeta(row)"
+                :class="[
+                  'inline-flex items-center gap-1.5 pl-0.5 text-[11px] font-medium leading-4',
+                  getOpenAICompactMeta(row)?.className
+                ]"
+                :title="getOpenAICompactTitle(row)"
               >
-                {{ getAntigravityTierLabel(row) }}
-              </span>
+                <span :class="['h-1.5 w-1.5 rounded-full', getOpenAICompactMeta(row)?.dotClass]" />
+                <span>{{ getOpenAICompactMeta(row)?.label }}</span>
+              </div>
             </div>
           </template>
           <template #cell-capacity="{ row }">
@@ -296,7 +319,17 @@
     <AccountActionMenu :show="menu.show" :account="menu.acc" :position="menu.pos" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" />
     <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
     <ImportDataModal :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
-    <BulkEditAccountModal :show="showBulkEdit" :account-ids="selIds" :selected-platforms="selPlatforms" :selected-types="selTypes" :proxies="proxies" :groups="groups" @close="showBulkEdit = false" @updated="handleBulkUpdated" />
+    <BulkEditAccountModal
+      :show="showBulkEdit"
+      :account-ids="selIds"
+      :selected-platforms="selPlatforms"
+      :selected-types="selTypes"
+      :target="bulkEditTarget ?? undefined"
+      :proxies="proxies"
+      :groups="groups"
+      @close="showBulkEdit = false"
+      @updated="handleBulkUpdated"
+    />
     <TempUnschedStatusModal :show="showTempUnsched" :account="tempUnschedAcc" @close="showTempUnsched = false" @reset="handleTempUnschedReset" />
     <ConfirmDialog :show="showDeleteDialog" :title="t('admin.accounts.deleteAccount')" :message="t('admin.accounts.deleteConfirm', { name: deletingAcc?.name })" :confirm-text="t('common.delete')" :cancel-text="t('common.cancel')" :danger="true" @confirm="confirmDelete" @cancel="showDeleteDialog = false" />
     <ConfirmDialog :show="showExportDataDialog" :title="t('admin.accounts.dataExport')" :message="t('admin.accounts.dataExportConfirmMessage')" :confirm-text="t('admin.accounts.dataExportConfirm')" :cancel-text="t('common.cancel')" @confirm="handleExportData" @cancel="showExportDataDialog = false">
@@ -357,6 +390,29 @@ const proxies = ref<AccountProxy[]>([])
 const groups = ref<AdminGroup[]>([])
 const accountTableRef = ref<HTMLElement | null>(null)
 const dataTableRef = ref<InstanceType<typeof DataTable> | null>(null)
+type AccountBulkEditTarget =
+  | {
+      mode: 'selected'
+      accountIds: number[]
+      selectedPlatforms: AccountPlatform[]
+      selectedTypes: AccountType[]
+    }
+  | {
+      mode: 'filtered'
+      filters: {
+        platform?: string
+        type?: string
+        status?: string
+        group?: string
+        search?: string
+        privacy_mode?: string
+        sort_by?: string
+        sort_order?: AccountSortOrder
+      }
+      previewCount: number
+      selectedPlatforms: AccountPlatform[]
+      selectedTypes: AccountType[]
+    }
 const selPlatforms = computed<AccountPlatform[]>(() => {
   const platforms = new Set(
     accounts.value
@@ -380,6 +436,7 @@ const showImportData = ref(false)
 const showExportDataDialog = ref(false)
 const includeProxyOnExport = ref(true)
 const showBulkEdit = ref(false)
+const bulkEditTarget = ref<AccountBulkEditTarget | null>(null)
 const showTempUnsched = ref(false)
 const showDeleteDialog = ref(false)
 const showReAuth = ref(false)
@@ -932,6 +989,53 @@ function getAntigravityTierLabel(row: any): string | null {
   }
 }
 
+type OpenAICompactBadgeState = 'active' | 'blocked' | 'auto'
+
+function getOpenAICompactState(row: any): OpenAICompactBadgeState | null {
+  if (row.platform !== 'openai' || (row.type !== 'oauth' && row.type !== 'apikey')) return null
+  const extra = row.extra as Record<string, unknown> | undefined
+  const mode = typeof extra?.openai_compact_mode === 'string' ? extra.openai_compact_mode : 'auto'
+  if (mode === 'force_on') return 'active'
+  if (mode === 'force_off') return 'blocked'
+  if (typeof extra?.openai_compact_supported === 'boolean') {
+    return extra.openai_compact_supported ? 'active' : 'blocked'
+  }
+  return 'auto'
+}
+
+function getOpenAICompactMeta(row: any): { label: string; className: string; dotClass: string } | null {
+  const state = getOpenAICompactState(row)
+  if (!state) return null
+  switch (state) {
+    case 'active':
+      return {
+        label: t('admin.accounts.openai.compactSupported'),
+        className: 'text-emerald-600 dark:text-emerald-300',
+        dotClass: 'bg-emerald-500 shadow-[0_0_0_2px_rgba(16,185,129,0.14)]'
+      }
+    case 'blocked':
+      return {
+        label: t('admin.accounts.openai.compactUnsupported'),
+        className: 'text-rose-600 dark:text-rose-300',
+        dotClass: 'bg-rose-500 shadow-[0_0_0_2px_rgba(244,63,94,0.14)]'
+      }
+    case 'auto':
+      return {
+        label: t('admin.accounts.openai.compactAuto'),
+        className: 'text-slate-500 dark:text-slate-400',
+        dotClass: 'bg-slate-300 dark:bg-slate-500'
+      }
+  }
+}
+
+function getOpenAICompactTitle(row: any): string {
+  const extra = row.extra as Record<string, unknown> | undefined
+  const checkedAt = typeof extra?.openai_compact_checked_at === 'string' ? extra.openai_compact_checked_at : ''
+  const label = getOpenAICompactMeta(row)?.label || ''
+  if (!checkedAt) return label
+  return `${label} | ${t('admin.accounts.openai.compactLastChecked')}: ${formatDateTime(new Date(checkedAt))}`
+}
+
 function getAntigravityTierClass(row: any): string {
   const tier = getAntigravityTierFromRow(row)
   switch (tier) {
@@ -1172,7 +1276,57 @@ const handleBulkToggleSchedulable = async (schedulable: boolean) => {
     appStore.showError(t('common.error'))
   }
 }
-const handleBulkUpdated = () => { showBulkEdit.value = false; clearSelection(); reload() }
+const buildBulkEditFilterSnapshot = () => {
+  const rawParams = toRaw(params) as Record<string, unknown>
+  const sortOrder: AccountSortOrder = rawParams.sort_order === 'desc' ? 'desc' : 'asc'
+  return {
+    platform: typeof rawParams.platform === 'string' ? rawParams.platform : '',
+    type: typeof rawParams.type === 'string' ? rawParams.type : '',
+    status: typeof rawParams.status === 'string' ? rawParams.status : '',
+    group: typeof rawParams.group === 'string' ? rawParams.group : '',
+    search: typeof rawParams.search === 'string' ? rawParams.search : '',
+    privacy_mode: typeof rawParams.privacy_mode === 'string' ? rawParams.privacy_mode : '',
+    sort_by: typeof rawParams.sort_by === 'string' ? rawParams.sort_by : '',
+    sort_order: sortOrder
+  }
+}
+
+const collectSelectionMetadata = (rows: Account[]) => {
+  const selectedPlatforms = Array.from(new Set(rows.map(account => account.platform)))
+  const selectedTypes = Array.from(new Set(rows.map(account => account.type)))
+  return { selectedPlatforms, selectedTypes }
+}
+
+const openBulkEditSelected = () => {
+  bulkEditTarget.value = {
+    mode: 'selected',
+    accountIds: [...selIds.value],
+    selectedPlatforms: [...selPlatforms.value],
+    selectedTypes: [...selTypes.value]
+  }
+  showBulkEdit.value = true
+}
+
+const openBulkEditFiltered = async () => {
+  const filters = buildBulkEditFilterSnapshot()
+  const preview = await adminAPI.accounts.list(1, 100, filters)
+  const { selectedPlatforms, selectedTypes } = collectSelectionMetadata(preview.items)
+  bulkEditTarget.value = {
+    mode: 'filtered',
+    filters,
+    previewCount: preview.total,
+    selectedPlatforms,
+    selectedTypes
+  }
+  showBulkEdit.value = true
+}
+
+const handleBulkUpdated = () => {
+  showBulkEdit.value = false
+  bulkEditTarget.value = null
+  clearSelection()
+  reload()
+}
 const handleDataImported = () => { showImportData.value = false; reload() }
 const ACCOUNT_UNGROUPED_GROUP_QUERY_VALUE = 'ungrouped'
 const ACCOUNT_PRIVACY_MODE_UNSET_QUERY_VALUE = '__unset__'

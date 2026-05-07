@@ -30,9 +30,7 @@ You represent and warrant that:
 
 (b) If Your employer(s) has rights to intellectual property that You create that includes Your Contributions, You have received permission to make Contributions on behalf of that employer, or that Your employer has waived such rights for Your Contributions to the Project.
 
-(c) Each of Your Contributions is Your original creation. Your Contribution submissions include complete details of any third-party license or other restriction (including, but not limited to, related patents and trademarks) of which You are personally aware and which are associated with any part of Your Contributions.
-
-You agree to indemnify and hold harmless the Project Owner from and against any claims, damages, or expenses (including reasonable attorneys' fees) arising from any breach of the representations and warranties in this Agreement.
+(c) Each of Your Contributions is Your original creation, or You have sufficient rights to submit it under the terms of this Agreement. You agree to provide, upon request, reasonable documentation or explanation of any third-party materials included in Your Contributions.
 
 ## 6. No Warranty
 

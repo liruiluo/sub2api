@@ -393,6 +393,56 @@ func parseTempUnschedInt(value any) int {
 	return 0
 }
 
+const (
+	// OpenAICompactModeAuto follows compact-probe results when deciding compact eligibility.
+	OpenAICompactModeAuto = "auto"
+	// OpenAICompactModeForceOn always treats the account as compact-supported.
+	OpenAICompactModeForceOn = "force_on"
+	// OpenAICompactModeForceOff always treats the account as compact-unsupported.
+	OpenAICompactModeForceOff = "force_off"
+)
+
+func normalizeOpenAICompactMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case OpenAICompactModeForceOn:
+		return OpenAICompactModeForceOn
+	case OpenAICompactModeForceOff:
+		return OpenAICompactModeForceOff
+	default:
+		return OpenAICompactModeAuto
+	}
+}
+
+func stringMappingFromRaw(raw any) map[string]string {
+	switch mapping := raw.(type) {
+	case map[string]any:
+		if len(mapping) == 0 {
+			return nil
+		}
+		result := make(map[string]string, len(mapping))
+		for key, value := range mapping {
+			if str, ok := value.(string); ok {
+				result[key] = str
+			}
+		}
+		if len(result) == 0 {
+			return nil
+		}
+		return result
+	case map[string]string:
+		if len(mapping) == 0 {
+			return nil
+		}
+		result := make(map[string]string, len(mapping))
+		for key, value := range mapping {
+			result[key] = value
+		}
+		return result
+	default:
+		return nil
+	}
+}
+
 func (a *Account) GetModelMapping() map[string]string {
 	credentialsPtr := mapPtr(a.Credentials)
 	rawMapping, _ := a.Credentials["model_mapping"].(map[string]any)
@@ -519,48 +569,22 @@ func ensureAntigravityDefaultPassthroughs(mapping map[string]string, models []st
 	}
 }
 
-// IsModelSupported 检查模型是否在 model_mapping 中（支持通配符）
-// 如果未配置 mapping，返回 true（允许所有模型）
-func (a *Account) IsModelSupported(requestedModel string) bool {
-	mapping := a.GetModelMapping()
-	if len(mapping) == 0 {
-		return true // 无映射 = 允许所有
+func normalizeRequestedModelForLookup(platform, requestedModel string) string {
+	trimmed := strings.TrimSpace(requestedModel)
+	if trimmed == "" {
+		return ""
 	}
-	// 精确匹配
-	if _, exists := mapping[requestedModel]; exists {
-		return true
+	if platform != PlatformGemini && platform != PlatformAntigravity {
+		return trimmed
 	}
-	// 通配符匹配
-	for pattern := range mapping {
-		if matchWildcard(pattern, requestedModel) {
-			return true
-		}
+	if trimmed == "gemini-3.1-pro-preview-customtools" {
+		return "gemini-3.1-pro-preview"
 	}
-	return false
+	return trimmed
 }
 
-// GetMappedModel 获取映射后的模型名（支持通配符，最长优先匹配）
-// 如果未配置 mapping，返回原始模型名
-func (a *Account) GetMappedModel(requestedModel string) string {
-	mapping := a.GetModelMapping()
-	if len(mapping) == 0 {
-		return requestedModel
-	}
-	// 精确匹配优先
-	if mappedModel, exists := mapping[requestedModel]; exists {
-		return mappedModel
-	}
-	// 通配符匹配（最长优先）
-	return matchWildcardMapping(mapping, requestedModel)
-}
-
-// HasExplicitModelMapping reports whether the requested model matched an
-// explicit model_mapping rule on this account, including identity passthrough
-// entries such as "qwen3-coder-plus" -> "qwen3-coder-plus" and wildcard
-// matches. Empty model_mapping means false.
-func (a *Account) HasExplicitModelMapping(requestedModel string) bool {
-	mapping := a.GetModelMapping()
-	if len(mapping) == 0 {
+func mappingSupportsRequestedModel(mapping map[string]string, requestedModel string) bool {
+	if requestedModel == "" {
 		return false
 	}
 	if _, exists := mapping[requestedModel]; exists {
@@ -572,6 +596,127 @@ func (a *Account) HasExplicitModelMapping(requestedModel string) bool {
 		}
 	}
 	return false
+}
+
+func resolveRequestedModelInMapping(mapping map[string]string, requestedModel string) (mappedModel string, matched bool) {
+	if requestedModel == "" {
+		return "", false
+	}
+	if mappedModel, exists := mapping[requestedModel]; exists {
+		return mappedModel, true
+	}
+	return matchWildcardMappingResult(mapping, requestedModel)
+}
+
+// IsModelSupported 检查模型是否在 model_mapping 中（支持通配符）
+// 如果未配置 mapping，返回 true（允许所有模型）
+func (a *Account) IsModelSupported(requestedModel string) bool {
+	mapping := a.GetModelMapping()
+	if len(mapping) == 0 {
+		return true // 无映射 = 允许所有
+	}
+	if mappingSupportsRequestedModel(mapping, requestedModel) {
+		return true
+	}
+	normalized := normalizeRequestedModelForLookup(a.Platform, requestedModel)
+	return normalized != requestedModel && mappingSupportsRequestedModel(mapping, normalized)
+}
+
+// GetMappedModel 获取映射后的模型名（支持通配符，最长优先匹配）
+// 如果未配置 mapping，返回原始模型名
+func (a *Account) GetMappedModel(requestedModel string) string {
+	mappedModel, _ := a.ResolveMappedModel(requestedModel)
+	return mappedModel
+}
+
+// ResolveMappedModel 获取映射后的模型名，并返回是否命中了账号级映射。
+// matched=true 表示命中了精确映射或通配符映射，即使映射结果与原模型名相同。
+func (a *Account) ResolveMappedModel(requestedModel string) (mappedModel string, matched bool) {
+	mapping := a.GetModelMapping()
+	if len(mapping) == 0 {
+		return requestedModel, false
+	}
+	if mappedModel, matched := resolveRequestedModelInMapping(mapping, requestedModel); matched {
+		return mappedModel, true
+	}
+	normalized := normalizeRequestedModelForLookup(a.Platform, requestedModel)
+	if normalized != requestedModel {
+		if mappedModel, matched := resolveRequestedModelInMapping(mapping, normalized); matched {
+			return mappedModel, true
+		}
+	}
+	return requestedModel, false
+}
+
+// GetOpenAICompactMode returns the compact routing mode for an OpenAI account.
+// Missing or invalid values fall back to "auto".
+func (a *Account) GetOpenAICompactMode() string {
+	if a == nil || !a.IsOpenAI() || a.Extra == nil {
+		return OpenAICompactModeAuto
+	}
+	mode, _ := a.Extra["openai_compact_mode"].(string)
+	return normalizeOpenAICompactMode(mode)
+}
+
+// OpenAICompactSupportKnown reports whether compact capability is known for this
+// account and, when known, whether it is supported.
+func (a *Account) OpenAICompactSupportKnown() (supported bool, known bool) {
+	if a == nil || !a.IsOpenAI() {
+		return false, false
+	}
+
+	switch a.GetOpenAICompactMode() {
+	case OpenAICompactModeForceOn:
+		return true, true
+	case OpenAICompactModeForceOff:
+		return false, true
+	}
+
+	if a.Extra == nil {
+		return false, false
+	}
+	supported, ok := a.Extra["openai_compact_supported"].(bool)
+	if !ok {
+		return false, false
+	}
+	return supported, true
+}
+
+// AllowsOpenAICompact reports whether the account may be considered for compact
+// requests. Unknown capability remains allowed to avoid breaking older accounts
+// before an explicit probe has been run.
+func (a *Account) AllowsOpenAICompact() bool {
+	if a == nil || !a.IsOpenAI() {
+		return false
+	}
+	supported, known := a.OpenAICompactSupportKnown()
+	if !known {
+		return true
+	}
+	return supported
+}
+
+// GetCompactModelMapping returns compact-only model remapping configuration.
+// This mapping is intended for /responses/compact only and does not affect
+// normal /responses traffic.
+func (a *Account) GetCompactModelMapping() map[string]string {
+	if a == nil || a.Credentials == nil {
+		return nil
+	}
+	return stringMappingFromRaw(a.Credentials["compact_model_mapping"])
+}
+
+// ResolveCompactMappedModel resolves compact-only model remapping and reports
+// whether a compact-specific mapping rule matched.
+func (a *Account) ResolveCompactMappedModel(requestedModel string) (mappedModel string, matched bool) {
+	mapping := a.GetCompactModelMapping()
+	if len(mapping) == 0 {
+		return requestedModel, false
+	}
+	if mappedModel, matched := resolveRequestedModelInMapping(mapping, requestedModel); matched {
+		return mappedModel, true
+	}
+	return requestedModel, false
 }
 
 func (a *Account) GetBaseURL() string {
@@ -646,8 +791,13 @@ func matchWildcard(pattern, str string) bool {
 }
 
 // matchWildcardMapping 通配符映射匹配（最长优先）
-// 如果没有匹配，返回原始字符串
+// 如果没有匹配，返回原始字符串。
 func matchWildcardMapping(mapping map[string]string, requestedModel string) string {
+	mapped, _ := matchWildcardMappingResult(mapping, requestedModel)
+	return mapped
+}
+
+func matchWildcardMappingResult(mapping map[string]string, requestedModel string) (string, bool) {
 	// 收集所有匹配的 pattern，按长度降序排序（最长优先）
 	type patternMatch struct {
 		pattern string
@@ -662,7 +812,7 @@ func matchWildcardMapping(mapping map[string]string, requestedModel string) stri
 	}
 
 	if len(matches) == 0 {
-		return requestedModel // 无匹配，返回原始模型名
+		return requestedModel, false // 无匹配，返回原始模型名
 	}
 
 	// 按 pattern 长度降序排序
@@ -673,7 +823,7 @@ func matchWildcardMapping(mapping map[string]string, requestedModel string) stri
 		return matches[i].pattern < matches[j].pattern
 	})
 
-	return matches[0].target
+	return matches[0].target, true
 }
 
 func (a *Account) IsCustomErrorCodesEnabled() bool {
@@ -887,6 +1037,32 @@ func (a *Account) GetChatGPTAccountID() string {
 		return ""
 	}
 	return a.GetCredential("chatgpt_account_id")
+}
+
+func (a *Account) GetOpenAIDeviceID() string {
+	if !a.IsOpenAIOAuth() {
+		return ""
+	}
+	return strings.TrimSpace(a.GetExtraString("openai_device_id"))
+}
+
+func (a *Account) GetOpenAISessionID() string {
+	if !a.IsOpenAIOAuth() {
+		return ""
+	}
+	return strings.TrimSpace(a.GetExtraString("openai_session_id"))
+}
+
+func (a *Account) SupportsOpenAIImageCapability(capability OpenAIImagesCapability) bool {
+	if !a.IsOpenAI() {
+		return false
+	}
+	switch capability {
+	case OpenAIImagesCapabilityBasic, OpenAIImagesCapabilityNative:
+		return a.Type == AccountTypeOAuth || a.Type == AccountTypeAPIKey
+	default:
+		return true
+	}
 }
 
 func (a *Account) GetChatGPTUserID() string {

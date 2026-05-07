@@ -70,7 +70,10 @@ type Config struct {
 	JWT                     JWTConfig                     `mapstructure:"jwt"`
 	Totp                    TotpConfig                    `mapstructure:"totp"`
 	LinuxDo                 LinuxDoConnectConfig          `mapstructure:"linuxdo_connect"`
+	WeChat                  WeChatConnectConfig           `mapstructure:"wechat_connect"`
 	OIDC                    OIDCConnectConfig             `mapstructure:"oidc_connect"`
+	GitHubOAuth             EmailOAuthProviderConfig      `mapstructure:"github_oauth"`
+	GoogleOAuth             EmailOAuthProviderConfig      `mapstructure:"google_oauth"`
 	Default                 DefaultConfig                 `mapstructure:"default"`
 	RateLimit               RateLimitConfig               `mapstructure:"rate_limit"`
 	Pricing                 PricingConfig                 `mapstructure:"pricing"`
@@ -190,32 +193,285 @@ type LinuxDoConnectConfig struct {
 	UserInfoUsernamePath string `mapstructure:"userinfo_username_path"`
 }
 
+type WeChatConnectConfig struct {
+	Enabled             bool   `mapstructure:"enabled"`
+	AppID               string `mapstructure:"app_id"`
+	AppSecret           string `mapstructure:"app_secret"`
+	OpenAppID           string `mapstructure:"open_app_id"`
+	OpenAppSecret       string `mapstructure:"open_app_secret"`
+	MPAppID             string `mapstructure:"mp_app_id"`
+	MPAppSecret         string `mapstructure:"mp_app_secret"`
+	MobileAppID         string `mapstructure:"mobile_app_id"`
+	MobileAppSecret     string `mapstructure:"mobile_app_secret"`
+	OpenEnabled         bool   `mapstructure:"open_enabled"`
+	MPEnabled           bool   `mapstructure:"mp_enabled"`
+	MobileEnabled       bool   `mapstructure:"mobile_enabled"`
+	Mode                string `mapstructure:"mode"`
+	Scopes              string `mapstructure:"scopes"`
+	RedirectURL         string `mapstructure:"redirect_url"`
+	FrontendRedirectURL string `mapstructure:"frontend_redirect_url"`
+}
+
 type OIDCConnectConfig struct {
-	Enabled              bool   `mapstructure:"enabled"`
-	ProviderName         string `mapstructure:"provider_name"` // 显示名: "Keycloak" 等
-	ClientID             string `mapstructure:"client_id"`
-	ClientSecret         string `mapstructure:"client_secret"`
-	IssuerURL            string `mapstructure:"issuer_url"`
-	DiscoveryURL         string `mapstructure:"discovery_url"`
-	AuthorizeURL         string `mapstructure:"authorize_url"`
-	TokenURL             string `mapstructure:"token_url"`
-	UserInfoURL          string `mapstructure:"userinfo_url"`
-	JWKSURL              string `mapstructure:"jwks_url"`
-	Scopes               string `mapstructure:"scopes"`                // 默认 "openid email profile"
-	RedirectURL          string `mapstructure:"redirect_url"`          // 后端回调地址（需在提供方后台登记）
-	FrontendRedirectURL  string `mapstructure:"frontend_redirect_url"` // 前端接收 token 的路由（默认：/auth/oidc/callback）
-	TokenAuthMethod      string `mapstructure:"token_auth_method"`     // client_secret_post / client_secret_basic / none
-	UsePKCE              bool   `mapstructure:"use_pkce"`
-	ValidateIDToken      bool   `mapstructure:"validate_id_token"`
-	AllowedSigningAlgs   string `mapstructure:"allowed_signing_algs"`   // 默认 "RS256,ES256,PS256"
-	ClockSkewSeconds     int    `mapstructure:"clock_skew_seconds"`     // 默认 120
-	RequireEmailVerified bool   `mapstructure:"require_email_verified"` // 默认 false
+	Enabled                 bool   `mapstructure:"enabled"`
+	ProviderName            string `mapstructure:"provider_name"` // 显示名: "Keycloak" 等
+	ClientID                string `mapstructure:"client_id"`
+	ClientSecret            string `mapstructure:"client_secret"`
+	IssuerURL               string `mapstructure:"issuer_url"`
+	DiscoveryURL            string `mapstructure:"discovery_url"`
+	AuthorizeURL            string `mapstructure:"authorize_url"`
+	TokenURL                string `mapstructure:"token_url"`
+	UserInfoURL             string `mapstructure:"userinfo_url"`
+	JWKSURL                 string `mapstructure:"jwks_url"`
+	Scopes                  string `mapstructure:"scopes"`                // 默认 "openid email profile"
+	RedirectURL             string `mapstructure:"redirect_url"`          // 后端回调地址（需在提供方后台登记）
+	FrontendRedirectURL     string `mapstructure:"frontend_redirect_url"` // 前端接收 token 的路由（默认：/auth/oidc/callback）
+	TokenAuthMethod         string `mapstructure:"token_auth_method"`     // client_secret_post / client_secret_basic / none
+	UsePKCE                 bool   `mapstructure:"use_pkce"`
+	ValidateIDToken         bool   `mapstructure:"validate_id_token"`
+	UsePKCEExplicit         bool   `mapstructure:"-" yaml:"-"`
+	ValidateIDTokenExplicit bool   `mapstructure:"-" yaml:"-"`
+	AllowedSigningAlgs      string `mapstructure:"allowed_signing_algs"`   // 默认 "RS256,ES256,PS256"
+	ClockSkewSeconds        int    `mapstructure:"clock_skew_seconds"`     // 默认 120
+	RequireEmailVerified    bool   `mapstructure:"require_email_verified"` // 默认 false
 
 	// 可选：用于从 userinfo JSON 中提取字段的 gjson 路径。
 	// 为空时，服务端会尝试一组常见字段名。
 	UserInfoEmailPath    string `mapstructure:"userinfo_email_path"`
 	UserInfoIDPath       string `mapstructure:"userinfo_id_path"`
 	UserInfoUsernamePath string `mapstructure:"userinfo_username_path"`
+}
+
+type EmailOAuthProviderConfig struct {
+	Enabled             bool   `mapstructure:"enabled"`
+	ClientID            string `mapstructure:"client_id"`
+	ClientSecret        string `mapstructure:"client_secret"`
+	AuthorizeURL        string `mapstructure:"authorize_url"`
+	TokenURL            string `mapstructure:"token_url"`
+	UserInfoURL         string `mapstructure:"userinfo_url"`
+	EmailsURL           string `mapstructure:"emails_url"`
+	Scopes              string `mapstructure:"scopes"`
+	RedirectURL         string `mapstructure:"redirect_url"`
+	FrontendRedirectURL string `mapstructure:"frontend_redirect_url"`
+}
+
+const (
+	defaultWeChatConnectMode             = "open"
+	defaultWeChatConnectScopes           = "snsapi_login"
+	defaultWeChatConnectFrontendRedirect = "/auth/wechat/callback"
+)
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func normalizeWeChatConnectMode(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "mp":
+		return "mp"
+	case "mobile":
+		return "mobile"
+	default:
+		return defaultWeChatConnectMode
+	}
+}
+
+func normalizeWeChatConnectStoredMode(openEnabled, mpEnabled, mobileEnabled bool, mode string) string {
+	mode = normalizeWeChatConnectMode(mode)
+	switch mode {
+	case "open":
+		if openEnabled {
+			return "open"
+		}
+	case "mp":
+		if mpEnabled {
+			return "mp"
+		}
+	case "mobile":
+		if mobileEnabled {
+			return "mobile"
+		}
+	}
+	switch {
+	case openEnabled:
+		return "open"
+	case mpEnabled:
+		return "mp"
+	case mobileEnabled:
+		return "mobile"
+	default:
+		return mode
+	}
+}
+
+func defaultWeChatConnectScopesForMode(mode string) string {
+	switch normalizeWeChatConnectMode(mode) {
+	case "mp":
+		return "snsapi_userinfo"
+	case "mobile":
+		return ""
+	default:
+		return defaultWeChatConnectScopes
+	}
+}
+
+func normalizeWeChatConnectScopes(raw, mode string) string {
+	switch normalizeWeChatConnectMode(mode) {
+	case "mp":
+		switch strings.TrimSpace(raw) {
+		case "snsapi_base":
+			return "snsapi_base"
+		case "snsapi_userinfo":
+			return "snsapi_userinfo"
+		default:
+			return defaultWeChatConnectScopesForMode(mode)
+		}
+	case "mobile":
+		return ""
+	default:
+		return defaultWeChatConnectScopes
+	}
+}
+
+func shouldApplyLegacyWeChatEnv(configKey, envKey string) bool {
+	if viper.InConfig(configKey) {
+		return false
+	}
+	_, hasNewEnv := os.LookupEnv(envKey)
+	return !hasNewEnv
+}
+
+func hasExplicitConfigOrEnv(configKey, envKey string) bool {
+	if viper.InConfig(configKey) {
+		return true
+	}
+	_, ok := os.LookupEnv(envKey)
+	return ok
+}
+
+func applyLegacyWeChatConnectEnvCompatibility(cfg *WeChatConnectConfig) {
+	if cfg == nil {
+		return
+	}
+
+	legacyOpenAppID := ""
+	if shouldApplyLegacyWeChatEnv("wechat_connect.open_app_id", "WECHAT_CONNECT_OPEN_APP_ID") &&
+		shouldApplyLegacyWeChatEnv("wechat_connect.app_id", "WECHAT_CONNECT_APP_ID") {
+		legacyOpenAppID = strings.TrimSpace(os.Getenv("WECHAT_OAUTH_OPEN_APP_ID"))
+		if legacyOpenAppID != "" {
+			cfg.OpenAppID = legacyOpenAppID
+		}
+	}
+
+	legacyOpenAppSecret := ""
+	if shouldApplyLegacyWeChatEnv("wechat_connect.open_app_secret", "WECHAT_CONNECT_OPEN_APP_SECRET") &&
+		shouldApplyLegacyWeChatEnv("wechat_connect.app_secret", "WECHAT_CONNECT_APP_SECRET") {
+		legacyOpenAppSecret = strings.TrimSpace(os.Getenv("WECHAT_OAUTH_OPEN_APP_SECRET"))
+		if legacyOpenAppSecret != "" {
+			cfg.OpenAppSecret = legacyOpenAppSecret
+		}
+	}
+
+	legacyMPAppID := ""
+	if shouldApplyLegacyWeChatEnv("wechat_connect.mp_app_id", "WECHAT_CONNECT_MP_APP_ID") &&
+		shouldApplyLegacyWeChatEnv("wechat_connect.app_id", "WECHAT_CONNECT_APP_ID") {
+		legacyMPAppID = strings.TrimSpace(os.Getenv("WECHAT_OAUTH_MP_APP_ID"))
+		if legacyMPAppID != "" {
+			cfg.MPAppID = legacyMPAppID
+		}
+	}
+
+	legacyMPAppSecret := ""
+	if shouldApplyLegacyWeChatEnv("wechat_connect.mp_app_secret", "WECHAT_CONNECT_MP_APP_SECRET") &&
+		shouldApplyLegacyWeChatEnv("wechat_connect.app_secret", "WECHAT_CONNECT_APP_SECRET") {
+		legacyMPAppSecret = strings.TrimSpace(os.Getenv("WECHAT_OAUTH_MP_APP_SECRET"))
+		if legacyMPAppSecret != "" {
+			cfg.MPAppSecret = legacyMPAppSecret
+		}
+	}
+
+	if shouldApplyLegacyWeChatEnv("wechat_connect.frontend_redirect_url", "WECHAT_CONNECT_FRONTEND_REDIRECT_URL") {
+		if legacyFrontend := strings.TrimSpace(os.Getenv("WECHAT_OAUTH_FRONTEND_REDIRECT_URL")); legacyFrontend != "" {
+			cfg.FrontendRedirectURL = legacyFrontend
+		}
+	}
+
+	hasLegacyOpen := legacyOpenAppID != "" && legacyOpenAppSecret != ""
+	hasLegacyMP := legacyMPAppID != "" && legacyMPAppSecret != ""
+
+	if shouldApplyLegacyWeChatEnv("wechat_connect.enabled", "WECHAT_CONNECT_ENABLED") && (hasLegacyOpen || hasLegacyMP) {
+		cfg.Enabled = true
+	}
+	if shouldApplyLegacyWeChatEnv("wechat_connect.open_enabled", "WECHAT_CONNECT_OPEN_ENABLED") && hasLegacyOpen {
+		cfg.OpenEnabled = true
+	}
+	if shouldApplyLegacyWeChatEnv("wechat_connect.mp_enabled", "WECHAT_CONNECT_MP_ENABLED") && hasLegacyMP {
+		cfg.MPEnabled = true
+	}
+	if shouldApplyLegacyWeChatEnv("wechat_connect.mode", "WECHAT_CONNECT_MODE") {
+		switch {
+		case hasLegacyMP && !hasLegacyOpen:
+			cfg.Mode = "mp"
+		case hasLegacyOpen:
+			cfg.Mode = "open"
+		}
+	}
+	if shouldApplyLegacyWeChatEnv("wechat_connect.scopes", "WECHAT_CONNECT_SCOPES") {
+		switch {
+		case hasLegacyMP && !hasLegacyOpen:
+			cfg.Scopes = defaultWeChatConnectScopesForMode("mp")
+		case hasLegacyOpen:
+			cfg.Scopes = defaultWeChatConnectScopesForMode("open")
+		}
+	}
+}
+
+func normalizeWeChatConnectConfig(cfg *WeChatConnectConfig) {
+	if cfg == nil {
+		return
+	}
+
+	cfg.AppID = strings.TrimSpace(cfg.AppID)
+	cfg.AppSecret = strings.TrimSpace(cfg.AppSecret)
+	cfg.OpenAppID = strings.TrimSpace(cfg.OpenAppID)
+	cfg.OpenAppSecret = strings.TrimSpace(cfg.OpenAppSecret)
+	cfg.MPAppID = strings.TrimSpace(cfg.MPAppID)
+	cfg.MPAppSecret = strings.TrimSpace(cfg.MPAppSecret)
+	cfg.MobileAppID = strings.TrimSpace(cfg.MobileAppID)
+	cfg.MobileAppSecret = strings.TrimSpace(cfg.MobileAppSecret)
+	cfg.Mode = normalizeWeChatConnectMode(cfg.Mode)
+	cfg.RedirectURL = strings.TrimSpace(cfg.RedirectURL)
+	cfg.FrontendRedirectURL = strings.TrimSpace(cfg.FrontendRedirectURL)
+
+	cfg.AppID = firstNonEmptyString(cfg.AppID, cfg.OpenAppID, cfg.MPAppID, cfg.MobileAppID)
+	cfg.AppSecret = firstNonEmptyString(cfg.AppSecret, cfg.OpenAppSecret, cfg.MPAppSecret, cfg.MobileAppSecret)
+	cfg.OpenAppID = firstNonEmptyString(cfg.OpenAppID, cfg.AppID)
+	cfg.OpenAppSecret = firstNonEmptyString(cfg.OpenAppSecret, cfg.AppSecret)
+	cfg.MPAppID = firstNonEmptyString(cfg.MPAppID, cfg.AppID)
+	cfg.MPAppSecret = firstNonEmptyString(cfg.MPAppSecret, cfg.AppSecret)
+	cfg.MobileAppID = firstNonEmptyString(cfg.MobileAppID, cfg.AppID)
+	cfg.MobileAppSecret = firstNonEmptyString(cfg.MobileAppSecret, cfg.AppSecret)
+
+	if !cfg.OpenEnabled && !cfg.MPEnabled && !cfg.MobileEnabled && cfg.Enabled {
+		switch cfg.Mode {
+		case "mp":
+			cfg.MPEnabled = true
+		case "mobile":
+			cfg.MobileEnabled = true
+		default:
+			cfg.OpenEnabled = true
+		}
+	}
+	cfg.Mode = normalizeWeChatConnectStoredMode(cfg.OpenEnabled, cfg.MPEnabled, cfg.MobileEnabled, cfg.Mode)
+	cfg.Scopes = normalizeWeChatConnectScopes(cfg.Scopes, cfg.Mode)
+	if cfg.FrontendRedirectURL == "" {
+		cfg.FrontendRedirectURL = defaultWeChatConnectFrontendRedirect
+	}
 }
 
 // TokenRefreshConfig OAuth token自动刷新配置
@@ -334,6 +590,24 @@ type ConcurrencyConfig struct {
 	PingInterval int `mapstructure:"ping_interval"`
 }
 
+type ImageConcurrencyConfig struct {
+	// Enabled: 是否启用图片生成独立并发限制，默认关闭以保持现有行为
+	Enabled bool `mapstructure:"enabled"`
+	// MaxConcurrentRequests: 当前进程允许同时处理的图片生成请求数，0表示不限制
+	MaxConcurrentRequests int `mapstructure:"max_concurrent_requests"`
+	// OverflowMode: 图片并发达到上限后的处理方式：reject/wait
+	OverflowMode string `mapstructure:"overflow_mode"`
+	// WaitTimeoutSeconds: overflow_mode=wait 时等待图片并发槽位的超时时间（秒）
+	WaitTimeoutSeconds int `mapstructure:"wait_timeout_seconds"`
+	// MaxWaitingRequests: overflow_mode=wait 时当前进程允许排队等待的图片请求数
+	MaxWaitingRequests int `mapstructure:"max_waiting_requests"`
+}
+
+const (
+	ImageConcurrencyOverflowModeReject = "reject"
+	ImageConcurrencyOverflowModeWait   = "wait"
+)
+
 // GatewayConfig API网关相关配置
 type GatewayConfig struct {
 	// 等待上游响应头的超时时间（秒），0表示无超时
@@ -352,6 +626,9 @@ type GatewayConfig struct {
 	// ForceCodexCLI: 强制将 OpenAI `/v1/responses` 请求按 Codex CLI 处理。
 	// 用于网关未透传/改写 User-Agent 时的兼容兜底（默认关闭，避免影响其他客户端）。
 	ForceCodexCLI bool `mapstructure:"force_codex_cli"`
+	// CodexImageGenerationBridgeEnabled: 是否为 Codex `/v1/responses` 自动注入 image_generation 工具和桥接指令。
+	// 默认关闭，避免纯文本 Codex 请求被意外改写；显式携带 image_generation 工具的请求仍按分组能力转发。
+	CodexImageGenerationBridgeEnabled bool `mapstructure:"codex_image_generation_bridge_enabled"`
 	// ForcedCodexInstructionsTemplateFile: 服务端强制附加到 Codex 顶层 instructions 的模板文件路径。
 	// 模板渲染后会直接覆盖最终 instructions；若需要保留客户端 system 转换结果，请在模板中显式引用 {{ .ExistingInstructions }}。
 	ForcedCodexInstructionsTemplateFile string `mapstructure:"forced_codex_instructions_template_file"`
@@ -363,6 +640,8 @@ type GatewayConfig struct {
 	OpenAIPassthroughAllowTimeoutHeaders bool `mapstructure:"openai_passthrough_allow_timeout_headers"`
 	// OpenAIWS: OpenAI Responses WebSocket 配置（默认开启，可按需回滚到 HTTP）
 	OpenAIWS GatewayOpenAIWSConfig `mapstructure:"openai_ws"`
+	// ImageConcurrency: 图片生成独立并发限制配置（默认关闭）
+	ImageConcurrency ImageConcurrencyConfig `mapstructure:"image_concurrency"`
 
 	// HTTP 上游连接池配置（性能优化：支持高并发场景调优）
 	// MaxIdleConns: 所有主机的最大空闲连接总数
@@ -394,6 +673,10 @@ type GatewayConfig struct {
 	StreamDataIntervalTimeout int `mapstructure:"stream_data_interval_timeout"`
 	// StreamKeepaliveInterval: 流式 keepalive 间隔（秒），0表示禁用
 	StreamKeepaliveInterval int `mapstructure:"stream_keepalive_interval"`
+	// ImageStreamDataIntervalTimeout: 图片流数据间隔超时（秒），0表示禁用
+	ImageStreamDataIntervalTimeout int `mapstructure:"image_stream_data_interval_timeout"`
+	// ImageStreamKeepaliveInterval: 图片流式 keepalive 间隔（秒），0表示禁用
+	ImageStreamKeepaliveInterval int `mapstructure:"image_stream_keepalive_interval"`
 	// MaxLineSize: 上游 SSE 单行最大字节数（0使用默认值）
 	MaxLineSize int `mapstructure:"max_line_size"`
 
@@ -1012,6 +1295,8 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	cfg.LinuxDo.UserInfoEmailPath = strings.TrimSpace(cfg.LinuxDo.UserInfoEmailPath)
 	cfg.LinuxDo.UserInfoIDPath = strings.TrimSpace(cfg.LinuxDo.UserInfoIDPath)
 	cfg.LinuxDo.UserInfoUsernamePath = strings.TrimSpace(cfg.LinuxDo.UserInfoUsernamePath)
+	applyLegacyWeChatConnectEnvCompatibility(&cfg.WeChat)
+	normalizeWeChatConnectConfig(&cfg.WeChat)
 	cfg.OIDC.ProviderName = strings.TrimSpace(cfg.OIDC.ProviderName)
 	cfg.OIDC.ClientID = strings.TrimSpace(cfg.OIDC.ClientID)
 	cfg.OIDC.ClientSecret = strings.TrimSpace(cfg.OIDC.ClientSecret)
@@ -1029,6 +1314,8 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	cfg.OIDC.UserInfoEmailPath = strings.TrimSpace(cfg.OIDC.UserInfoEmailPath)
 	cfg.OIDC.UserInfoIDPath = strings.TrimSpace(cfg.OIDC.UserInfoIDPath)
 	cfg.OIDC.UserInfoUsernamePath = strings.TrimSpace(cfg.OIDC.UserInfoUsernamePath)
+	cfg.OIDC.UsePKCEExplicit = hasExplicitConfigOrEnv("oidc_connect.use_pkce", "OIDC_CONNECT_USE_PKCE")
+	cfg.OIDC.ValidateIDTokenExplicit = hasExplicitConfigOrEnv("oidc_connect.validate_id_token", "OIDC_CONNECT_VALIDATE_ID_TOKEN")
 	cfg.Dashboard.KeyPrefix = strings.TrimSpace(cfg.Dashboard.KeyPrefix)
 	cfg.CORS.AllowedOrigins = normalizeStringSlice(cfg.CORS.AllowedOrigins)
 	cfg.Security.ResponseHeaders.AdditionalAllowed = normalizeStringSlice(cfg.Security.ResponseHeaders.AdditionalAllowed)
@@ -1207,6 +1494,24 @@ func setDefaults() {
 	viper.SetDefault("linuxdo_connect.userinfo_id_path", "")
 	viper.SetDefault("linuxdo_connect.userinfo_username_path", "")
 
+	// WeChat Connect OAuth 登录
+	viper.SetDefault("wechat_connect.enabled", false)
+	viper.SetDefault("wechat_connect.app_id", "")
+	viper.SetDefault("wechat_connect.app_secret", "")
+	viper.SetDefault("wechat_connect.open_app_id", "")
+	viper.SetDefault("wechat_connect.open_app_secret", "")
+	viper.SetDefault("wechat_connect.mp_app_id", "")
+	viper.SetDefault("wechat_connect.mp_app_secret", "")
+	viper.SetDefault("wechat_connect.mobile_app_id", "")
+	viper.SetDefault("wechat_connect.mobile_app_secret", "")
+	viper.SetDefault("wechat_connect.open_enabled", false)
+	viper.SetDefault("wechat_connect.mp_enabled", false)
+	viper.SetDefault("wechat_connect.mobile_enabled", false)
+	viper.SetDefault("wechat_connect.mode", defaultWeChatConnectMode)
+	viper.SetDefault("wechat_connect.scopes", defaultWeChatConnectScopes)
+	viper.SetDefault("wechat_connect.redirect_url", "")
+	viper.SetDefault("wechat_connect.frontend_redirect_url", defaultWeChatConnectFrontendRedirect)
+
 	// Generic OIDC OAuth 登录
 	viper.SetDefault("oidc_connect.enabled", false)
 	viper.SetDefault("oidc_connect.provider_name", "OIDC")
@@ -1222,7 +1527,7 @@ func setDefaults() {
 	viper.SetDefault("oidc_connect.redirect_url", "")
 	viper.SetDefault("oidc_connect.frontend_redirect_url", "/auth/oidc/callback")
 	viper.SetDefault("oidc_connect.token_auth_method", "client_secret_post")
-	viper.SetDefault("oidc_connect.use_pkce", false)
+	viper.SetDefault("oidc_connect.use_pkce", true)
 	viper.SetDefault("oidc_connect.validate_id_token", true)
 	viper.SetDefault("oidc_connect.allowed_signing_algs", "RS256,ES256,PS256")
 	viper.SetDefault("oidc_connect.clock_skew_seconds", 120)
@@ -1362,6 +1667,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.max_account_switches", 10)
 	viper.SetDefault("gateway.max_account_switches_gemini", 3)
 	viper.SetDefault("gateway.force_codex_cli", false)
+	viper.SetDefault("gateway.codex_image_generation_bridge_enabled", false)
 	viper.SetDefault("gateway.openai_passthrough_allow_timeout_headers", false)
 	// OpenAI Responses WebSocket（默认开启；可通过 force_http 紧急回滚）
 	viper.SetDefault("gateway.openai_ws.enabled", true)
@@ -1409,6 +1715,11 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_ws.scheduler_score_weights.queue", 0.7)
 	viper.SetDefault("gateway.openai_ws.scheduler_score_weights.error_rate", 0.8)
 	viper.SetDefault("gateway.openai_ws.scheduler_score_weights.ttft", 0.5)
+	viper.SetDefault("gateway.image_concurrency.enabled", false)
+	viper.SetDefault("gateway.image_concurrency.max_concurrent_requests", 0)
+	viper.SetDefault("gateway.image_concurrency.overflow_mode", ImageConcurrencyOverflowModeReject)
+	viper.SetDefault("gateway.image_concurrency.wait_timeout_seconds", 30)
+	viper.SetDefault("gateway.image_concurrency.max_waiting_requests", 100)
 	viper.SetDefault("gateway.antigravity_fallback_cooldown_minutes", 1)
 	viper.SetDefault("gateway.antigravity_extra_retries", 10)
 	viper.SetDefault("gateway.max_body_size", int64(256*1024*1024))
@@ -1426,6 +1737,8 @@ func setDefaults() {
 	viper.SetDefault("gateway.concurrency_slot_ttl_minutes", 30) // 并发槽位过期时间（支持超长请求）
 	viper.SetDefault("gateway.stream_data_interval_timeout", 180)
 	viper.SetDefault("gateway.stream_keepalive_interval", 10)
+	viper.SetDefault("gateway.image_stream_data_interval_timeout", 900)
+	viper.SetDefault("gateway.image_stream_keepalive_interval", 10)
 	viper.SetDefault("gateway.max_line_size", 500*1024*1024)
 	viper.SetDefault("gateway.scheduling.sticky_session_max_waiting", 3)
 	viper.SetDefault("gateway.scheduling.sticky_session_wait_timeout", 120*time.Second)
@@ -1634,9 +1947,6 @@ func (c *Config) Validate() error {
 		default:
 			return fmt.Errorf("linuxdo_connect.token_auth_method must be one of: client_secret_post/client_secret_basic/none")
 		}
-		if method == "none" && !c.LinuxDo.UsePKCE {
-			return fmt.Errorf("linuxdo_connect.use_pkce must be true when linuxdo_connect.token_auth_method=none")
-		}
 		if (method == "" || method == "client_secret_post" || method == "client_secret_basic") &&
 			strings.TrimSpace(c.LinuxDo.ClientSecret) == "" {
 			return fmt.Errorf("linuxdo_connect.client_secret is required when linuxdo_connect.enabled=true and token_auth_method is client_secret_post/client_secret_basic")
@@ -1667,6 +1977,45 @@ func (c *Config) Validate() error {
 		warnIfInsecureURL("linuxdo_connect.redirect_url", c.LinuxDo.RedirectURL)
 		warnIfInsecureURL("linuxdo_connect.frontend_redirect_url", c.LinuxDo.FrontendRedirectURL)
 	}
+	if c.WeChat.Enabled {
+		weChat := c.WeChat
+		normalizeWeChatConnectConfig(&weChat)
+
+		if weChat.OpenEnabled {
+			if strings.TrimSpace(weChat.OpenAppID) == "" {
+				return fmt.Errorf("wechat_connect.open_app_id is required when wechat_connect.open_enabled=true")
+			}
+			if strings.TrimSpace(weChat.OpenAppSecret) == "" {
+				return fmt.Errorf("wechat_connect.open_app_secret is required when wechat_connect.open_enabled=true")
+			}
+		}
+		if weChat.MPEnabled {
+			if strings.TrimSpace(weChat.MPAppID) == "" {
+				return fmt.Errorf("wechat_connect.mp_app_id is required when wechat_connect.mp_enabled=true")
+			}
+			if strings.TrimSpace(weChat.MPAppSecret) == "" {
+				return fmt.Errorf("wechat_connect.mp_app_secret is required when wechat_connect.mp_enabled=true")
+			}
+		}
+		if weChat.MobileEnabled {
+			if strings.TrimSpace(weChat.MobileAppID) == "" {
+				return fmt.Errorf("wechat_connect.mobile_app_id is required when wechat_connect.mobile_enabled=true")
+			}
+			if strings.TrimSpace(weChat.MobileAppSecret) == "" {
+				return fmt.Errorf("wechat_connect.mobile_app_secret is required when wechat_connect.mobile_enabled=true")
+			}
+		}
+		if v := strings.TrimSpace(weChat.RedirectURL); v != "" {
+			if err := ValidateAbsoluteHTTPURL(v); err != nil {
+				return fmt.Errorf("wechat_connect.redirect_url invalid: %w", err)
+			}
+			warnIfInsecureURL("wechat_connect.redirect_url", v)
+		}
+		if err := ValidateFrontendRedirectURL(weChat.FrontendRedirectURL); err != nil {
+			return fmt.Errorf("wechat_connect.frontend_redirect_url invalid: %w", err)
+		}
+		warnIfInsecureURL("wechat_connect.frontend_redirect_url", weChat.FrontendRedirectURL)
+	}
 	if c.OIDC.Enabled {
 		if strings.TrimSpace(c.OIDC.ClientID) == "" {
 			return fmt.Errorf("oidc_connect.client_id is required when oidc_connect.enabled=true")
@@ -1689,9 +2038,6 @@ func (c *Config) Validate() error {
 		case "", "client_secret_post", "client_secret_basic", "none":
 		default:
 			return fmt.Errorf("oidc_connect.token_auth_method must be one of: client_secret_post/client_secret_basic/none")
-		}
-		if method == "none" && !c.OIDC.UsePKCE {
-			return fmt.Errorf("oidc_connect.use_pkce must be true when oidc_connect.token_auth_method=none")
 		}
 		if (method == "" || method == "client_secret_post" || method == "client_secret_basic") &&
 			strings.TrimSpace(c.OIDC.ClientSecret) == "" {
@@ -1943,6 +2289,21 @@ func (c *Config) Validate() error {
 				ConnectionPoolIsolationProxy, ConnectionPoolIsolationAccount, ConnectionPoolIsolationAccountProxy)
 		}
 	}
+	if c.Gateway.ImageConcurrency.MaxConcurrentRequests < 0 {
+		return fmt.Errorf("gateway.image_concurrency.max_concurrent_requests must be non-negative")
+	}
+	switch strings.TrimSpace(c.Gateway.ImageConcurrency.OverflowMode) {
+	case "", ImageConcurrencyOverflowModeReject, ImageConcurrencyOverflowModeWait:
+	default:
+		return fmt.Errorf("gateway.image_concurrency.overflow_mode must be one of: %s/%s",
+			ImageConcurrencyOverflowModeReject, ImageConcurrencyOverflowModeWait)
+	}
+	if c.Gateway.ImageConcurrency.WaitTimeoutSeconds < 0 {
+		return fmt.Errorf("gateway.image_concurrency.wait_timeout_seconds must be non-negative")
+	}
+	if c.Gateway.ImageConcurrency.MaxWaitingRequests < 0 {
+		return fmt.Errorf("gateway.image_concurrency.max_waiting_requests must be non-negative")
+	}
 	if c.Gateway.MaxIdleConns <= 0 {
 		return fmt.Errorf("gateway.max_idle_conns must be positive")
 	}
@@ -1980,6 +2341,20 @@ func (c *Config) Validate() error {
 	if c.Gateway.StreamKeepaliveInterval != 0 &&
 		(c.Gateway.StreamKeepaliveInterval < 5 || c.Gateway.StreamKeepaliveInterval > 30) {
 		return fmt.Errorf("gateway.stream_keepalive_interval must be 0 or between 5-30 seconds")
+	}
+	if c.Gateway.ImageStreamDataIntervalTimeout < 0 {
+		return fmt.Errorf("gateway.image_stream_data_interval_timeout must be non-negative")
+	}
+	if c.Gateway.ImageStreamDataIntervalTimeout != 0 &&
+		(c.Gateway.ImageStreamDataIntervalTimeout < 60 || c.Gateway.ImageStreamDataIntervalTimeout > 1800) {
+		return fmt.Errorf("gateway.image_stream_data_interval_timeout must be 0 or between 60-1800 seconds")
+	}
+	if c.Gateway.ImageStreamKeepaliveInterval < 0 {
+		return fmt.Errorf("gateway.image_stream_keepalive_interval must be non-negative")
+	}
+	if c.Gateway.ImageStreamKeepaliveInterval != 0 &&
+		(c.Gateway.ImageStreamKeepaliveInterval < 5 || c.Gateway.ImageStreamKeepaliveInterval > 60) {
+		return fmt.Errorf("gateway.image_stream_keepalive_interval must be 0 or between 5-60 seconds")
 	}
 	// 兼容旧键 sticky_previous_response_ttl_seconds
 	if c.Gateway.OpenAIWS.StickyResponseIDTTLSeconds <= 0 && c.Gateway.OpenAIWS.StickyPreviousResponseTTLSeconds > 0 {
