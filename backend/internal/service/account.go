@@ -648,6 +648,15 @@ func (a *Account) ResolveMappedModel(requestedModel string) (mappedModel string,
 	return requestedModel, false
 }
 
+// HasExplicitModelMapping reports whether the requested model matched an
+// explicit model_mapping rule on this account, including identity passthrough
+// entries such as "qwen3-coder-plus" -> "qwen3-coder-plus" and wildcard
+// matches. Empty model_mapping means false.
+func (a *Account) HasExplicitModelMapping(requestedModel string) bool {
+	_, matched := a.ResolveMappedModel(requestedModel)
+	return matched
+}
+
 // GetOpenAICompactMode returns the compact routing mode for an OpenAI account.
 // Missing or invalid values fall back to "auto".
 func (a *Account) GetOpenAICompactMode() string {

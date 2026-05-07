@@ -325,7 +325,7 @@ func TestAccountTestService_OpenAIAPIKeyUsesNonStreamResponses(t *testing.T) {
 		},
 	}
 
-	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4")
+	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", "")
 	require.NoError(t, err)
 	require.Len(t, upstream.requests, 1)
 	require.Equal(t, "https://api.daiju.live/v1/responses", upstream.requests[0].URL.String())
@@ -366,7 +366,7 @@ func TestAccountTestService_OpenAIAPIKeyCompatFallbackPersistsFlag(t *testing.T)
 		},
 	}
 
-	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4")
+	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", "")
 	require.NoError(t, err)
 	require.Len(t, upstream.requests, 2)
 	require.Equal(t, "https://api.daiju.live/v1/responses", upstream.requests[0].URL.String())
