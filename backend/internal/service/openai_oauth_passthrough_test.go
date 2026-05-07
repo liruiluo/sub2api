@@ -462,6 +462,46 @@ func TestOpenAIGatewayService_OAuthPassthrough_UpstreamRequestIgnoresClientCance
 	require.NoError(t, upstream.lastReq.Context().Err())
 }
 
+func TestResolveOpenAICodexVersionUsesGatewayFloorAndNewerClientUserAgent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name      string
+		userAgent string
+		want      string
+	}{
+		{
+			name:      "old codex tui user agent uses gateway floor",
+			userAgent: "codex-tui/0.121.0 (Ubuntu 24.4.0; x86_64) VTE_7600_ (codex-tui; 0.121.0)",
+			want:      codexCLIVersion,
+		},
+		{
+			name:      "current codex tui user agent",
+			userAgent: "codex-tui/0.125.0 (Ubuntu 24.4.0; x86_64) VTE_7600_ (codex-tui; 0.125.0)",
+			want:      codexCLIVersion,
+		},
+		{
+			name:      "codex cli rs user agent",
+			userAgent: "codex_cli_rs/0.126.1 (Linux; x86_64)",
+			want:      "0.126.1",
+		},
+		{
+			name:      "fallback for unknown client",
+			userAgent: "curl/8.0",
+			want:      codexCLIVersion,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil)
+			c.Request.Header.Set("User-Agent", tt.userAgent)
+			require.Equal(t, tt.want, resolveOpenAICodexVersion(c))
+		})
+	}
+}
+
 func TestOpenAIGatewayService_OAuthPassthrough_CodexMissingInstructionsRejectedBeforeUpstream(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	logSink, restore := captureStructuredLog(t)
