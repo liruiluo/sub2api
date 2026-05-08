@@ -135,3 +135,47 @@ func TestOpenAIOAuthService_RefreshAccountToken_RefreshFailureFallsBackToSession
 	require.True(t, ok)
 	require.Contains(t, cookie, "__Secure-next-auth.session-token=session-token-fallback")
 }
+
+func TestOpenAITokenRefresher_NeedsRefresh_SkipsAccountWithoutRefreshToken(t *testing.T) {
+	refresher := NewOpenAITokenRefresher(nil, nil)
+	expiresAt := time.Now().Add(time.Minute).UTC().Format(time.RFC3339)
+
+	withoutRT := &Account{
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token": "access-token",
+			"expires_at":   expiresAt,
+		},
+	}
+	require.False(t, refresher.NeedsRefresh(withoutRT, 5*time.Minute))
+
+	withRT := &Account{
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token":  "access-token",
+			"refresh_token": "refresh-token",
+			"expires_at":    expiresAt,
+		},
+	}
+	require.True(t, refresher.NeedsRefresh(withRT, 5*time.Minute))
+}
+
+func TestOpenAITokenProvider_NoRefreshTokenExpiredAccessTokenReturnsError(t *testing.T) {
+	provider := NewOpenAITokenProvider(nil, nil, nil)
+	expiresAt := time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)
+	account := &Account{
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token": "expired-access-token",
+			"expires_at":   expiresAt,
+		},
+	}
+
+	token, err := provider.GetAccessToken(context.Background(), account)
+	require.Error(t, err)
+	require.Empty(t, token)
+	require.Contains(t, err.Error(), "refresh_token is missing")
+}
