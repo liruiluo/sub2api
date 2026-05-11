@@ -211,7 +211,7 @@ func fetchCapturedFingerprint(t *testing.T, captureURL string, profile *Profile)
 
 	resp, err := client.Do(req)
 	if err != nil {
-		t.Fatalf("request failed: %v", err)
+		skipIfExternalServiceUnavailable(t, err)
 		return nil
 	}
 	defer resp.Body.Close()
