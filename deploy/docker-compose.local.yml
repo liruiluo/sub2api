@@ -147,6 +147,10 @@ services:
       # Proxy for accessing GitHub (online updates + pricing data)
       # Examples: http://host:port, socks5://host:port
       - UPDATE_PROXY_URL=${UPDATE_PROXY_URL:-}
+      - HTTP_PROXY=${SUB2API_HTTP_PROXY:-}
+      - HTTPS_PROXY=${SUB2API_HTTPS_PROXY:-}
+      - ALL_PROXY=${SUB2API_ALL_PROXY:-}
+      - NO_PROXY=${SUB2API_NO_PROXY:-}
 
       # =======================================================================
       # Image Generation Stream & Concurrency
