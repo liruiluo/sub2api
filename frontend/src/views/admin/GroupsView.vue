@@ -2966,6 +2966,7 @@ import {
   resetMessagesDispatchFormState,
   type MessagesDispatchMappingRow,
 } from "./groupsMessagesDispatch";
+import { normalizeSupportedModelScopesForPlatform } from "./groupsSupportedModelScopes";
 
 const { t } = useI18n();
 const appStore = useAppStore();
@@ -3820,6 +3821,10 @@ const handleCreateGroup = async () => {
       model_routing: convertRoutingRulesToApiFormat(
         createModelRoutingRules.value,
       ),
+      supported_model_scopes: normalizeSupportedModelScopesForPlatform(
+        createForm.platform,
+        createForm.supported_model_scopes,
+      ),
       messages_dispatch_model_config:
         createForm.platform === "openai"
           ? messagesDispatchFormStateToConfig({
@@ -3957,6 +3962,10 @@ const handleUpdateGroup = async () => {
           : editForm.fallback_group_id_on_invalid_request,
       model_routing: convertRoutingRulesToApiFormat(
         editModelRoutingRules.value,
+      ),
+      supported_model_scopes: normalizeSupportedModelScopesForPlatform(
+        editForm.platform,
+        editForm.supported_model_scopes,
       ),
       messages_dispatch_model_config:
         editForm.platform === "openai"
