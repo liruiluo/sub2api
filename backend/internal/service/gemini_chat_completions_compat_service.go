@@ -266,7 +266,7 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 	}
 
 	imageCount := 0
-	imageSize := s.extractImageSize(claudeBody)
+	imageSize := normalizeOpenAIImageSizeTier(s.extractImageInputSize(claudeBody))
 	if isImageGenerationModel(originalModel) {
 		imageCount = 1
 	}
