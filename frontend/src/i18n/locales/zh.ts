@@ -2448,7 +2448,12 @@ export default {
         ruleAccountsHint: '留空表示匹配所有账号',
         ruleModelPricing: '模型定价',
         noGroupsInChannel: '上方平台标签页中未选择分组',
-        unnamed: '未命名'
+        unnamed: '未命名',
+        syncLatestModels: '同步最新模型',
+        syncingModels: '同步中...',
+        syncModelsSuccess: '已同步 {count} 个新模型',
+        syncModelsAlreadyUpToDate: '模型列表已是最新',
+        syncModelsError: '同步模型失败'
       }
     },
 
@@ -2699,6 +2704,11 @@ export default {
         name: '名称',
         namePlaceholder: '输入监控名称',
         provider: '平台',
+        apiMode: 'OpenAI 协议',
+        apiModeChatCompletions: 'OpenAI Compatible',
+        apiModeChatCompletionsHint: '使用 /v1/chat/completions，发送 messages；适合大多数兼容站。',
+        apiModeResponses: 'Responses API',
+        apiModeResponsesHint: '使用 /v1/responses，默认带 instructions + input；适合本站自检/Codex。',
         endpoint: '上游地址',
         endpointPlaceholder: 'https://api.example.com',
         useCurrentDomain: '使用当前服务',

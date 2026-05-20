@@ -2370,10 +2370,15 @@ export default {
         searchAccountPlaceholder: 'Search accounts...',
         ruleAccountsHint: 'Leave empty to match all accounts',
         ruleModelPricing: 'Model Pricing',
-        noGroupsInChannel: 'No groups selected in platform tabs above',
-        unnamed: 'Unnamed'
-      }
-    },
+         noGroupsInChannel: 'No groups selected in platform tabs above',
+         unnamed: 'Unnamed',
+         syncLatestModels: 'Sync Latest Models',
+         syncingModels: 'Syncing...',
+         syncModelsSuccess: 'Synced {count} new model(s)',
+         syncModelsAlreadyUpToDate: 'Models already up to date',
+         syncModelsError: 'Failed to sync models'
+       }
+     },
 
     riskControl: {
       title: 'Risk Control',
@@ -2622,6 +2627,11 @@ export default {
         name: 'Name',
         namePlaceholder: 'Enter monitor name',
         provider: 'Platform',
+        apiMode: 'OpenAI protocol',
+        apiModeChatCompletions: 'OpenAI Compatible',
+        apiModeChatCompletionsHint: 'Use /v1/chat/completions with messages; works for most compatible providers.',
+        apiModeResponses: 'Responses API',
+        apiModeResponsesHint: 'Use /v1/responses with default instructions + input; best for self-check/Codex paths.',
         endpoint: 'Endpoint',
         endpointPlaceholder: 'https://api.example.com',
         useCurrentDomain: 'Use current service',
