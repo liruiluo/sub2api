@@ -135,7 +135,8 @@ func TestOpenAIGatewayService_ForwardResponsesCompatDirectNormalizesDeveloperRol
 	require.Len(t, upstream.bodies, 1)
 	require.Equal(t, "https://api.daiju.live/v1/chat/completions", upstream.requests[0].URL.String())
 	require.Equal(t, "system", gjson.GetBytes(upstream.bodies[0], "messages.0.role").String())
-	require.Equal(t, "user", gjson.GetBytes(upstream.bodies[0], "messages.1.role").String())
+	require.Equal(t, "system", gjson.GetBytes(upstream.bodies[0], "messages.1.role").String())
+	require.Equal(t, "user", gjson.GetBytes(upstream.bodies[0], "messages.2.role").String())
 	require.False(t, strings.Contains(rec.Body.String(), "upstream_error"))
 }
 
@@ -189,7 +190,6 @@ func TestOpenAIGatewayService_ForwardResponsesCompatDirectPreservesAPIKeyForward
 		})
 	}
 }
-
 
 func TestOpenAIGatewayService_ForwardResponsesCompatFallbackOnConvertRequestFailed(t *testing.T) {
 	gin.SetMode(gin.TestMode)

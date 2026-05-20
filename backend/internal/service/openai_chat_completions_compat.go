@@ -448,7 +448,7 @@ func (s *OpenAIGatewayService) handleResponsesViaChatCompletionsCompatSuccess(
 	if err := json.Unmarshal(body, &chatResp); err != nil {
 		return nil, nil, &UpstreamFailoverError{StatusCode: http.StatusBadGateway}
 	}
-	responsesResp := apicompat.ChatCompletionsToResponsesResponse(&chatResp, originalModel)
+	responsesResp := apicompat.ChatCompletionsResponseToResponses(&chatResp, originalModel)
 	if reqStream {
 		firstTokenMs, err := s.writeResponsesCompatStream(c, resp, responsesResp, startTime)
 		return &usageValue, firstTokenMs, err
