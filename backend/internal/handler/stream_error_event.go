@@ -39,19 +39,19 @@ func writeResponsesFailedSSE(c *gin.Context, errType, message string) bool {
 
 	var b strings.Builder
 	b.Grow(256 + len(message) + len(model))
-	b.WriteString(`{"type":"response.failed","response":{`)
-	b.WriteString(`"id":`)
-	b.WriteString(strconv.Quote(rid))
-	b.WriteString(`,"object":"response"`)
+	_, _ = b.WriteString(`{"type":"response.failed","response":{`)
+	_, _ = b.WriteString(`"id":`)
+	_, _ = b.WriteString(strconv.Quote(rid))
+	_, _ = b.WriteString(`,"object":"response"`)
 	if model != "" {
-		b.WriteString(`,"model":`)
-		b.WriteString(strconv.Quote(model))
+		_, _ = b.WriteString(`,"model":`)
+		_, _ = b.WriteString(strconv.Quote(model))
 	}
-	b.WriteString(`,"status":"failed","output":[],"error":{"code":`)
-	b.WriteString(strconv.Quote(code))
-	b.WriteString(`,"message":`)
-	b.WriteString(strconv.Quote(message))
-	b.WriteString(`}}}`)
+	_, _ = b.WriteString(`,"status":"failed","output":[],"error":{"code":`)
+	_, _ = b.WriteString(strconv.Quote(code))
+	_, _ = b.WriteString(`,"message":`)
+	_, _ = b.WriteString(strconv.Quote(message))
+	_, _ = b.WriteString(`}}}`)
 
 	if _, err := fmt.Fprintf(c.Writer, "event: response.failed\ndata: %s\n\n", b.String()); err != nil {
 		_ = c.Error(err)
