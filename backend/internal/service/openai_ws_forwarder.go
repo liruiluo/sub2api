@@ -4119,7 +4119,32 @@ func (s *OpenAIGatewayService) persistOpenAIWSRateLimitSignal(ctx context.Contex
 	if !isOpenAIWSRateLimitError(codeRaw, errTypeRaw, msgRaw) {
 		return
 	}
+	responseBody = ensureOpenAIWSRateLimitResetMetadata(responseBody, errTypeRaw, msgRaw)
 	s.handleOpenAIAccountUpstreamError(ctx, account, http.StatusTooManyRequests, headers, responseBody)
+}
+
+func ensureOpenAIWSRateLimitResetMetadata(responseBody []byte, errTypeRaw, msgRaw string) []byte {
+	if parseOpenAIRateLimitResetTime(responseBody) != nil {
+		return responseBody
+	}
+	errType := strings.ToLower(strings.TrimSpace(errTypeRaw))
+	msg := strings.ToLower(strings.TrimSpace(msgRaw))
+	if !strings.Contains(errType, "usage_limit") &&
+		(!strings.Contains(msg, "usage limit") || !strings.Contains(msg, "reached")) {
+		return responseBody
+	}
+	body := map[string]any{
+		"error": map[string]any{
+			"type":              "usage_limit_reached",
+			"message":           strings.TrimSpace(msgRaw),
+			"resets_in_seconds": defaultRateLimit429CooldownSeconds,
+		},
+	}
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		return responseBody
+	}
+	return encoded
 }
 
 func classifyOpenAIWSErrorEventFromRaw(codeRaw, errTypeRaw, msgRaw string) (string, bool) {
