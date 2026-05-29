@@ -290,7 +290,7 @@ func resolveOpenAIWSSessionHeaders(c *gin.Context, promptCacheKey string) openAI
 	cacheKey := strings.TrimSpace(promptCacheKey)
 	if cacheKey != "" {
 		if resolution.SessionID == "" {
-			resolution.SessionID = cacheKey
+			resolution.SessionID = isolateOpenAISessionID(getAPIKeyIDFromContext(c), cacheKey)
 			resolution.SessionSource = "prompt_cache_key"
 		}
 	}
