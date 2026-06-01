@@ -5,6 +5,15 @@ import (
 	"testing"
 )
 
+func mustParseClaudeMaxSimulationRequest(t *testing.T, body string) *ParsedRequest {
+	t.Helper()
+	parsed, err := ParseGatewayRequest(NewRequestBodyRef([]byte(body)), PlatformAnthropic)
+	if err != nil {
+		t.Fatalf("parse request: %v", err)
+	}
+	return parsed
+}
+
 func TestProjectUsageToClaudeMax1H_Conservation(t *testing.T) {
 	usage := &ClaudeUsage{
 		InputTokens:              1200,
@@ -12,25 +21,16 @@ func TestProjectUsageToClaudeMax1H_Conservation(t *testing.T) {
 		CacheCreation5mTokens:    0,
 		CacheCreation1hTokens:    0,
 	}
-	parsed := &ParsedRequest{
-		Model: "claude-sonnet-4-5",
-		Messages: []any{
-			map[string]any{
-				"role": "user",
-				"content": []any{
-					map[string]any{
-						"type":          "text",
-						"text":          strings.Repeat("cached context ", 200),
-						"cache_control": map[string]any{"type": "ephemeral"},
-					},
-					map[string]any{
-						"type": "text",
-						"text": "summarize quickly",
-					},
-				},
-			},
-		},
-	}
+	parsed := mustParseClaudeMaxSimulationRequest(t, `{
+		"model":"claude-sonnet-4-5",
+		"messages":[{
+			"role":"user",
+			"content":[
+				{"type":"text","text":"`+strings.Repeat("cached context ", 200)+`","cache_control":{"type":"ephemeral"}},
+				{"type":"text","text":"summarize quickly"}
+			]
+		}]
+	}`)
 
 	changed := projectUsageToClaudeMax1H(usage, parsed)
 	if !changed {
@@ -59,25 +59,16 @@ func TestProjectUsageToClaudeMax1H_Conservation(t *testing.T) {
 }
 
 func TestComputeClaudeMaxProjectedInputTokens_Deterministic(t *testing.T) {
-	parsed := &ParsedRequest{
-		Model: "claude-opus-4-5",
-		Messages: []any{
-			map[string]any{
-				"role": "user",
-				"content": []any{
-					map[string]any{
-						"type":          "text",
-						"text":          "build context",
-						"cache_control": map[string]any{"type": "ephemeral"},
-					},
-					map[string]any{
-						"type": "text",
-						"text": "what is failing now",
-					},
-				},
-			},
-		},
-	}
+	parsed := mustParseClaudeMaxSimulationRequest(t, `{
+		"model":"claude-opus-4-5",
+		"messages":[{
+			"role":"user",
+			"content":[
+				{"type":"text","text":"build context","cache_control":{"type":"ephemeral"}},
+				{"type":"text","text":"what is failing now"}
+			]
+		}]
+	}`)
 
 	got1 := computeClaudeMaxProjectedInputTokens(4096, parsed)
 	got2 := computeClaudeMaxProjectedInputTokens(4096, parsed)
@@ -101,54 +92,20 @@ func TestShouldSimulateClaudeMaxUsage(t *testing.T) {
 				CacheCreation1hTokens:    0,
 			},
 		},
-		ParsedRequest: &ParsedRequest{
-			Messages: []any{
-				map[string]any{
-					"role": "user",
-					"content": []any{
-						map[string]any{
-							"type":          "text",
-							"text":          "cached",
-							"cache_control": map[string]any{"type": "ephemeral"},
-						},
-						map[string]any{
-							"type": "text",
-							"text": "tail",
-						},
-					},
-				},
-			},
-		},
-		APIKey: &APIKey{Group: group},
+		ParsedRequest: mustParseClaudeMaxSimulationRequest(t, `{"messages":[{"role":"user","content":[{"type":"text","text":"cached","cache_control":{"type":"ephemeral"}},{"type":"text","text":"tail"}]}]}`),
+		APIKey:        &APIKey{Group: group},
 	}
 
 	if !shouldSimulateClaudeMaxUsage(input) {
 		t.Fatalf("expected simulate=true for claude group with cache signal")
 	}
 
-	input.ParsedRequest = &ParsedRequest{
-		Messages: []any{
-			map[string]any{"role": "user", "content": "no cache signal"},
-		},
-	}
+	input.ParsedRequest = mustParseClaudeMaxSimulationRequest(t, `{"messages":[{"role":"user","content":"no cache signal"}]}`)
 	if shouldSimulateClaudeMaxUsage(input) {
 		t.Fatalf("expected simulate=false when request has no cache signal")
 	}
 
-	input.ParsedRequest = &ParsedRequest{
-		Messages: []any{
-			map[string]any{
-				"role": "user",
-				"content": []any{
-					map[string]any{
-						"type":          "text",
-						"text":          "cached",
-						"cache_control": map[string]any{"type": "ephemeral"},
-					},
-				},
-			},
-		},
-	}
+	input.ParsedRequest = mustParseClaudeMaxSimulationRequest(t, `{"messages":[{"role":"user","content":[{"type":"text","text":"cached","cache_control":{"type":"ephemeral"}}]}]}`)
 	input.Result.Usage.CacheCreationInputTokens = 100
 	if shouldSimulateClaudeMaxUsage(input) {
 		t.Fatalf("expected simulate=false when cache creation already exists")

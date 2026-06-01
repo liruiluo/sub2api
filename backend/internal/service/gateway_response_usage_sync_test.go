@@ -36,25 +36,16 @@ func TestHandleNonStreamingResponse_UsageAlignedWithClaudeMaxSimulation(t *testi
 		Platform:                 PlatformAnthropic,
 		SimulateClaudeMaxEnabled: true,
 	}
-	parsed := &ParsedRequest{
-		Model: "claude-sonnet-4",
-		Messages: []any{
-			map[string]any{
-				"role": "user",
-				"content": []any{
-					map[string]any{
-						"type":          "text",
-						"text":          "long cached context",
-						"cache_control": map[string]any{"type": "ephemeral"},
-					},
-					map[string]any{
-						"type": "text",
-						"text": "new user question",
-					},
-				},
-			},
-		},
-	}
+	parsed := mustParseClaudeMaxSimulationRequest(t, `{
+		"model":"claude-sonnet-4",
+		"messages":[{
+			"role":"user",
+			"content":[
+				{"type":"text","text":"long cached context","cache_control":{"type":"ephemeral"}},
+				{"type":"text","text":"new user question"}
+			]
+		}]
+	}`)
 
 	upstreamBody := []byte(`{"id":"msg_1","model":"claude-sonnet-4","usage":{"input_tokens":120,"output_tokens":8}}`)
 	resp := &http.Response{
@@ -114,25 +105,16 @@ func TestHandleNonStreamingResponse_ClaudeMaxDisabled_NoSimulationIntercept(t *t
 		Platform:                 PlatformAnthropic,
 		SimulateClaudeMaxEnabled: false,
 	}
-	parsed := &ParsedRequest{
-		Model: "claude-sonnet-4",
-		Messages: []any{
-			map[string]any{
-				"role": "user",
-				"content": []any{
-					map[string]any{
-						"type":          "text",
-						"text":          "long cached context",
-						"cache_control": map[string]any{"type": "ephemeral"},
-					},
-					map[string]any{
-						"type": "text",
-						"text": "new user question",
-					},
-				},
-			},
-		},
-	}
+	parsed := mustParseClaudeMaxSimulationRequest(t, `{
+		"model":"claude-sonnet-4",
+		"messages":[{
+			"role":"user",
+			"content":[
+				{"type":"text","text":"long cached context","cache_control":{"type":"ephemeral"}},
+				{"type":"text","text":"new user question"}
+			]
+		}]
+	}`)
 
 	upstreamBody := []byte(`{"id":"msg_2","model":"claude-sonnet-4","usage":{"input_tokens":120,"output_tokens":8}}`)
 	resp := &http.Response{

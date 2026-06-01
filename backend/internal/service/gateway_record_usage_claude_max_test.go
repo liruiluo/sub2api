@@ -46,25 +46,16 @@ func TestRecordUsage_SimulateClaudeMaxEnabled_ProjectsUsageAndSkipsTTLOverride(t
 				InputTokens: 160,
 			},
 		},
-		ParsedRequest: &ParsedRequest{
-			Model: "claude-sonnet-4",
-			Messages: []any{
-				map[string]any{
-					"role": "user",
-					"content": []any{
-						map[string]any{
-							"type":          "text",
-							"text":          "long cached context for prior turns",
-							"cache_control": map[string]any{"type": "ephemeral"},
-						},
-						map[string]any{
-							"type": "text",
-							"text": "please summarize the logs and provide root cause analysis",
-						},
-					},
-				},
-			},
-		},
+		ParsedRequest: mustParseClaudeMaxSimulationRequest(t, `{
+			"model":"claude-sonnet-4",
+			"messages":[{
+				"role":"user",
+				"content":[
+					{"type":"text","text":"long cached context for prior turns","cache_control":{"type":"ephemeral"}},
+					{"type":"text","text":"please summarize the logs and provide root cause analysis"}
+				]
+			}]
+		}`),
 		APIKey: &APIKey{
 			ID:      1,
 			GroupID: &groupID,

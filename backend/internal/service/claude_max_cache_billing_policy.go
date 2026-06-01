@@ -192,10 +192,10 @@ func hasClaudeCacheSignals(parsed *ParsedRequest) bool {
 }
 
 func hasTopLevelEphemeralCacheControl(parsed *ParsedRequest) bool {
-	if parsed == nil || len(parsed.Body) == 0 {
+	if parsed == nil || parsed.Body.Len() == 0 {
 		return false
 	}
-	cacheType := strings.TrimSpace(gjson.GetBytes(parsed.Body, "cache_control.type").String())
+	cacheType := strings.TrimSpace(gjson.GetBytes(parsed.Body.Bytes(), "cache_control.type").String())
 	return strings.EqualFold(cacheType, "ephemeral")
 }
 
@@ -208,26 +208,28 @@ func analyzeClaudeCacheProjection(parsed *ParsedRequest) claudeCacheProjection {
 	total := 0
 	lastBreakpointAt := -1
 
-	switch system := parsed.System.(type) {
-	case string:
-		total += claudeMaxMessageOverheadTokens + estimateClaudeTextTokens(system)
-	case []any:
-		for _, raw := range system {
-			block, ok := raw.(map[string]any)
-			if !ok {
-				total += claudeMaxUnknownContentTokens
-				continue
-			}
-			total += estimateClaudeBlockTokens(block)
-			if hasEphemeralCacheControl(block) {
-				lastBreakpointAt = total
-				projection.BreakpointCount++
-				projection.HasBreakpoint = true
+	if system, ok := parsed.SystemValue(); ok {
+		switch system := system.(type) {
+		case string:
+			total += claudeMaxMessageOverheadTokens + estimateClaudeTextTokens(system)
+		case []any:
+			for _, raw := range system {
+				block, ok := raw.(map[string]any)
+				if !ok {
+					total += claudeMaxUnknownContentTokens
+					continue
+				}
+				total += estimateClaudeBlockTokens(block)
+				if hasEphemeralCacheControl(block) {
+					lastBreakpointAt = total
+					projection.BreakpointCount++
+					projection.HasBreakpoint = true
+				}
 			}
 		}
 	}
 
-	for _, rawMsg := range parsed.Messages {
+	for _, rawMsg := range decodeClaudeMaxMessages(parsed) {
 		total += claudeMaxMessageOverheadTokens
 		msg, ok := rawMsg.(map[string]any)
 		if !ok {
@@ -278,14 +280,16 @@ func countExplicitCacheBreakpoints(parsed *ParsedRequest) int {
 		return 0
 	}
 	total := 0
-	if system, ok := parsed.System.([]any); ok {
-		for _, raw := range system {
-			if block, ok := raw.(map[string]any); ok && hasEphemeralCacheControl(block) {
-				total++
+	if system, ok := parsed.SystemValue(); ok {
+		if systemParts, ok := system.([]any); ok {
+			for _, raw := range systemParts {
+				if block, ok := raw.(map[string]any); ok && hasEphemeralCacheControl(block) {
+					total++
+				}
 			}
 		}
 	}
-	for _, rawMsg := range parsed.Messages {
+	for _, rawMsg := range decodeClaudeMaxMessages(parsed) {
 		msg, ok := rawMsg.(map[string]any)
 		if !ok {
 			continue
@@ -301,6 +305,17 @@ func countExplicitCacheBreakpoints(parsed *ParsedRequest) int {
 		}
 	}
 	return total
+}
+
+func decodeClaudeMaxMessages(parsed *ParsedRequest) []any {
+	if parsed == nil {
+		return nil
+	}
+	var messages []any
+	if err := parsed.DecodeMessages(&messages); err != nil {
+		return nil
+	}
+	return messages
 }
 
 func hasEphemeralCacheControl(block map[string]any) bool {
@@ -386,11 +401,12 @@ func estimateClaudeBlockTokens(block map[string]any) int {
 }
 
 func estimateLastUserMessageTokens(parsed *ParsedRequest) int {
-	if parsed == nil || len(parsed.Messages) == 0 {
+	messages := decodeClaudeMaxMessages(parsed)
+	if len(messages) == 0 {
 		return 0
 	}
-	for i := len(parsed.Messages) - 1; i >= 0; i-- {
-		msg, ok := parsed.Messages[i].(map[string]any)
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg, ok := messages[i].(map[string]any)
 		if !ok {
 			continue
 		}
