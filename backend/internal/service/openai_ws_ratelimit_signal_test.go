@@ -435,7 +435,7 @@ func TestOpenAIGatewayService_UpdateCodexUsageSnapshot_ClearsStaleRateLimitWhenS
 		PrimaryUsedPercent:         ptrFloat64WS(12),
 		PrimaryResetAfterSeconds:   ptrIntWS(3600),
 		PrimaryWindowMinutes:       ptrIntWS(10080),
-		SecondaryUsedPercent:       ptrFloat64WS(100),
+		SecondaryUsedPercent:       ptrFloat64WS(0),
 		SecondaryResetAfterSeconds: ptrIntWS(1200),
 		SecondaryWindowMinutes:     ptrIntWS(300),
 	}

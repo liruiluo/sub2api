@@ -136,7 +136,7 @@ func TestBuildCodexUsageExtraUpdates_FallbackToNowWhenUpdatedAtInvalid(t *testin
 	}
 }
 
-func TestBuildCodexUsageExtraUpdates_ClampNegativeResetSeconds(t *testing.T) {
+func TestBuildCodexUsageExtraUpdates_NonExhaustedNegativeResetSeconds(t *testing.T) {
 	primaryUsed := 90.0
 	primaryReset := 7200
 	primaryWindow := 10080
@@ -165,11 +165,11 @@ func TestBuildCodexUsageExtraUpdates_ClampNegativeResetSeconds(t *testing.T) {
 	if got := updates["codex_5h_reset_at"]; got != "2026-02-16T10:00:00Z" {
 		t.Fatalf("codex_5h_reset_at = %v, want %s", got, "2026-02-16T10:00:00Z")
 	}
-	if got := updates[codexRateLimitActiveExtraKey]; got != true {
-		t.Fatalf("codex_rate_limit_active = %v, want true", got)
+	if got := updates[codexRateLimitActiveExtraKey]; got != false {
+		t.Fatalf("codex_rate_limit_active = %v, want false", got)
 	}
-	if got := updates[codexRateLimitResetAtExtraKey]; got != "2026-02-16T10:00:00Z" {
-		t.Fatalf("codex_rate_limit_reset_at = %v, want %s", got, "2026-02-16T10:00:00Z")
+	if got, ok := updates[codexRateLimitResetAtExtraKey]; !ok || got != nil {
+		t.Fatalf("codex_rate_limit_reset_at = %v, want nil", got)
 	}
 }
 
