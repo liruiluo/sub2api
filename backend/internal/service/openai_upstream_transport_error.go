@@ -124,6 +124,10 @@ func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Co
 		return err
 	}
 
+	if passthrough && s.shouldFailoverOpenAIPassthroughRequestError(err) {
+		s.markOpenAIPassthroughTransientOverload(ctx, account, safeErr)
+	}
+
 	if classifyOpenAITransportError(err).Persistent {
 		s.tempUnscheduleOpenAITransportError(ctx, account, safeErr)
 	}
