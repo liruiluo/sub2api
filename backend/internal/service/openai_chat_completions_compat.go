@@ -402,7 +402,7 @@ func (s *OpenAIGatewayService) forwardOpenAIResponsesViaChatCompletionsCompat(
 				Kind:               "failover",
 				Message:            upstreamMsg,
 			})
-			s.handleFailoverSideEffects(ctx, resp, account)
+			s.handleFailoverSideEffects(ctx, resp, account, respBody)
 			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody}
 		}
 		resp.Body = io.NopCloser(bytes.NewReader(respBody))
